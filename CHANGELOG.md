@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Database path default** (`src/config.py`): Changed default `DATABASE_PATH` from `./gitdiscord.db` to `./data/gitdiscord.db` so the container's `appuser` can write the SQLite file — the container only has write access to `/app/data`, not `/app`
+
+### Fixed
 - **Railway start command** (`railway.toml`): Changed `python src/main.py` to `python -m src.main` to fix `ModuleNotFoundError: No module named 'src'` on startup — running the file directly set Python's module search path to `/app/src` instead of `/app`, breaking all internal imports
 
 ### Added

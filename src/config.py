@@ -21,7 +21,9 @@ class Settings(BaseSettings):
     discord_bot_token: str
     webhook_secret: str
     webhook_port: int = 8080
-    database_path: str = "./gitdiscord.db"
+    # Default to ./data/ subdirectory so the container's appuser (write access
+    # to /app/data only) can create the SQLite file without permission errors.
+    database_path: str = "./data/gitdiscord.db"
     enable_message_content_intent: bool = False
     github_app_id: str = ""
     github_app_private_key: str = ""
