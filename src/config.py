@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     discord_bot_token: str
     webhook_secret: str
     webhook_port: int = 8080
-    database_path: str = "./gitdiscord.db"
+    database_path: str = "/app/data/gitdiscord.db"
     log_level: str = "INFO"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

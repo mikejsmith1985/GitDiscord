@@ -4,22 +4,27 @@
 
 FROM python:3.12-slim
 
-# Set working directory inside the container
 WORKDIR /app
 
-# Install dependencies before copying source to leverage Docker layer caching
+# Install Python dependencies as root so they land in the system site-packages.
+# Copying requirements.txt first lets Docker cache this layer until deps change.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the source code
-COPY src/ ./src/
+# Create a non-root user for runtime security, and a writable data directory
+# for the SQLite database that the bot creates at startup.
+RUN useradd --create-home --shell /bin/bash appuser && \
+    mkdir -p /app/data && \
+    chown -R appuser:appuser /app/data
+
+# Copy source code and set ownership so appuser can read it
+COPY --chown=appuser:appuser src/ ./src/
 
 # The webhook server listens on this port; Railway injects PORT automatically
 EXPOSE 8080
 
-# Use a non-root user for security
-RUN useradd --create-home appuser
+# Switch to non-root user for runtime
 USER appuser
 
-# Start both the Discord bot and webhook server
-CMD ["python", "src/main.py"]
+# Run as a module so Python resolves 'from src.x import ...' imports correctly
+CMD ["python", "-m", "src.main"]
