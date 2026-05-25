@@ -1,0 +1,9 @@
+# Railway deployment configuration for GitDiscord
+# See: https://docs.railway.app/reference/config-as-code
+
+[deploy]
+startCommand = "python src/main.py"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

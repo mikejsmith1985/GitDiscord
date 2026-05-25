@@ -1,0 +1,23 @@
+# Docker Compose for local development and self-hosted deployment
+# Usage: docker compose up --build
+
+services:
+  gitdiscord:
+    build: .
+    ports:
+      # Map host port 8080 to container port 8080 for webhook receiver
+      - "8080:8080"
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - WEBHOOK_PORT=8080
+      - DATABASE_PATH=/data/gitdiscord.db
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      # Persist the SQLite database across container restarts
+      - gitdiscord_data:/data
+    restart: unless-stopped
+
+volumes:
+  gitdiscord_data:
+    driver: local

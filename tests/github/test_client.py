@@ -1,0 +1,323 @@
+"""
+Tests for GitHubClient in src/github/client.py.
+
+All PyGithub HTTP calls are replaced with MagicMock objects so no real
+network requests are made.  Each test verifies the dict shape returned
+by the client and the PyGithub calls it delegates to.
+"""
+
+import pytest
+from datetime import datetime
+from unittest.mock import MagicMock, patch, call
+
+from github import UnknownObjectException
+
+from src.github.client import GitHubClient, MAX_ISSUES_PER_PAGE
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _make_mock_issue(
+    number: int = 1,
+    title: str = "Test Issue",
+    state: str = "open",
+    body: str | None = "Issue body text",
+    html_url: str = "https://github.com/owner/repo/issues/1",
+    user_login: str = "testuser",
+    label_names: list[str] | None = None,
+    assignee_logins: list[str] | None = None,
+) -> MagicMock:
+    """Build a MagicMock that mimics a PyGithub Issue object."""
+    mock_issue = MagicMock()
+    mock_issue.number = number
+    mock_issue.title = title
+    mock_issue.state = state
+    mock_issue.body = body
+    mock_issue.html_url = html_url
+    mock_issue.created_at = datetime(2024, 1, 15, 10, 0, 0)
+    mock_issue.user.login = user_login
+
+    resolved_label_names = label_names or []
+    mock_labels = []
+    for label_name in resolved_label_names:
+        label_mock = MagicMock()
+        label_mock.name = label_name
+        mock_labels.append(label_mock)
+    mock_issue.labels = mock_labels
+
+    resolved_assignee_logins = assignee_logins or []
+    mock_assignees = []
+    for login in resolved_assignee_logins:
+        assignee_mock = MagicMock()
+        assignee_mock.login = login
+        mock_assignees.append(assignee_mock)
+    mock_issue.assignees = mock_assignees
+
+    return mock_issue
+
+
+def _make_mock_comment(
+    comment_id: int = 101,
+    body: str = "A comment",
+    html_url: str = "https://github.com/owner/repo/issues/1#issuecomment-101",
+    user_login: str = "commenter",
+) -> MagicMock:
+    """Build a MagicMock that mimics a PyGithub IssueComment object."""
+    mock_comment = MagicMock()
+    mock_comment.id = comment_id
+    mock_comment.body = body
+    mock_comment.html_url = html_url
+    mock_comment.created_at = datetime(2024, 2, 10, 9, 30, 0)
+    mock_comment.user.login = user_login
+    return mock_comment
+
+
+@pytest.fixture
+def client_and_repo():
+    """
+    Provide a GitHubClient instance whose internal Github object is fully mocked.
+
+    Yields a tuple of (GitHubClient, mock_repo) so tests can both call the
+    client methods and assert on the mock_repo interactions.
+    """
+    mock_repo = MagicMock()
+    with patch("src.github.client.Github") as MockGithubClass:
+        mock_github_instance = MagicMock()
+        MockGithubClass.return_value = mock_github_instance
+        mock_github_instance.get_repo.return_value = mock_repo
+
+        github_client = GitHubClient(
+            personal_access_token="fake-pat",
+            repo_owner="owner",
+            repo_name="repo",
+        )
+        yield github_client, mock_repo
+
+
+# ── list_issues ───────────────────────────────────────────────────────────────
+
+
+class TestListIssues:
+    """Tests for GitHubClient.list_issues()."""
+
+    def test_list_issues_returns_list_of_dicts_with_correct_fields(self, client_and_repo):
+        """list_issues() converts PyGithub Issue objects into plain dicts with all expected keys."""
+        github_client, mock_repo = client_and_repo
+        mock_issue = _make_mock_issue(
+            number=7,
+            title="Fix the login bug",
+            state="open",
+            body="Detailed description",
+            html_url="https://github.com/owner/repo/issues/7",
+            user_login="alice",
+            label_names=["bug", "high-priority"],
+            assignee_logins=["bob"],
+        )
+        mock_repo.get_issues.return_value = [mock_issue]
+
+        result = github_client.list_issues()
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+
+        issue_dict = result[0]
+        assert issue_dict["number"] == 7
+        assert issue_dict["title"] == "Fix the login bug"
+        assert issue_dict["state"] == "open"
+        assert issue_dict["body"] == "Detailed description"
+        assert issue_dict["url"] == "https://github.com/owner/repo/issues/7"
+        assert issue_dict["created_at"] == "2024-01-15T10:00:00"
+        assert issue_dict["user_login"] == "alice"
+        assert issue_dict["labels"] == ["bug", "high-priority"]
+        assert issue_dict["assignees"] == ["bob"]
+
+    def test_list_issues_passes_open_state_by_default(self, client_and_repo):
+        """list_issues() calls get_issues with state='open' when no state argument is given."""
+        github_client, mock_repo = client_and_repo
+        mock_repo.get_issues.return_value = []
+
+        github_client.list_issues()
+
+        mock_repo.get_issues.assert_called_once_with(state="open")
+
+    def test_list_issues_passes_closed_state_when_requested(self, client_and_repo):
+        """list_issues(state='closed') forwards the 'closed' filter to PyGithub."""
+        github_client, mock_repo = client_and_repo
+        mock_repo.get_issues.return_value = []
+
+        github_client.list_issues(state="closed")
+
+        mock_repo.get_issues.assert_called_once_with(state="closed")
+
+    def test_list_issues_caps_results_at_max_issues_per_page(self, client_and_repo):
+        """list_issues() never returns more than MAX_ISSUES_PER_PAGE issues."""
+        github_client, mock_repo = client_and_repo
+        # Create one more issue than the cap to verify truncation.
+        oversized_issue_list = [
+            _make_mock_issue(number=issue_index)
+            for issue_index in range(MAX_ISSUES_PER_PAGE + 5)
+        ]
+        mock_repo.get_issues.return_value = oversized_issue_list
+
+        result = github_client.list_issues()
+
+        assert len(result) == MAX_ISSUES_PER_PAGE
+
+    def test_list_issues_handles_null_body_gracefully(self, client_and_repo):
+        """list_issues() converts a None issue body to an empty string rather than raising."""
+        github_client, mock_repo = client_and_repo
+        mock_issue = _make_mock_issue(body=None)
+        mock_repo.get_issues.return_value = [mock_issue]
+
+        result = github_client.list_issues()
+
+        assert result[0]["body"] == ""
+
+    def test_list_issues_returns_empty_list_when_no_issues_exist(self, client_and_repo):
+        """list_issues() returns an empty list rather than None when the repo has no issues."""
+        github_client, mock_repo = client_and_repo
+        mock_repo.get_issues.return_value = []
+
+        result = github_client.list_issues()
+
+        assert result == []
+
+
+# ── get_issue ─────────────────────────────────────────────────────────────────
+
+
+class TestGetIssue:
+    """Tests for GitHubClient.get_issue()."""
+
+    def test_get_issue_returns_correct_dict_for_existing_issue(self, client_and_repo):
+        """get_issue() returns a populated dict when the issue number exists."""
+        github_client, mock_repo = client_and_repo
+        mock_issue = _make_mock_issue(
+            number=42,
+            title="Upgrade dependencies",
+            state="open",
+            user_login="carol",
+        )
+        mock_repo.get_issue.return_value = mock_issue
+
+        result = github_client.get_issue(42)
+
+        assert result is not None
+        assert result["number"] == 42
+        assert result["title"] == "Upgrade dependencies"
+        assert result["user_login"] == "carol"
+        mock_repo.get_issue.assert_called_once_with(42)
+
+    def test_get_issue_returns_none_for_missing_issue(self, client_and_repo):
+        """get_issue() returns None when PyGithub raises UnknownObjectException."""
+        github_client, mock_repo = client_and_repo
+        mock_repo.get_issue.side_effect = UnknownObjectException(404, "Not Found", {})
+
+        result = github_client.get_issue(9999)
+
+        assert result is None
+
+
+# ── create_issue ──────────────────────────────────────────────────────────────
+
+
+class TestCreateIssue:
+    """Tests for GitHubClient.create_issue()."""
+
+    def test_create_issue_calls_pygithub_and_returns_issue_dict(self, client_and_repo):
+        """create_issue() delegates to repo.create_issue and converts the result to a dict."""
+        github_client, mock_repo = client_and_repo
+        mock_created_issue = _make_mock_issue(
+            number=55,
+            title="New feature request",
+            state="open",
+        )
+        mock_repo.create_issue.return_value = mock_created_issue
+
+        result = github_client.create_issue(title="New feature request", body="Please add X")
+
+        mock_repo.create_issue.assert_called_once_with(
+            title="New feature request", body="Please add X"
+        )
+        assert result["number"] == 55
+        assert result["title"] == "New feature request"
+
+    def test_create_issue_defaults_body_to_empty_string(self, client_and_repo):
+        """create_issue() passes an empty string body to PyGithub when no body is supplied."""
+        github_client, mock_repo = client_and_repo
+        mock_repo.create_issue.return_value = _make_mock_issue(title="Title only")
+
+        github_client.create_issue(title="Title only")
+
+        mock_repo.create_issue.assert_called_once_with(title="Title only", body="")
+
+
+# ── add_issue_comment ─────────────────────────────────────────────────────────
+
+
+class TestAddIssueComment:
+    """Tests for GitHubClient.add_issue_comment()."""
+
+    def test_add_issue_comment_returns_comment_dict_with_correct_fields(self, client_and_repo):
+        """add_issue_comment() returns a dict with id, body, url, created_at, and user_login."""
+        github_client, mock_repo = client_and_repo
+        mock_issue = _make_mock_issue(number=10)
+        mock_repo.get_issue.return_value = mock_issue
+        mock_comment = _make_mock_comment(
+            comment_id=999,
+            body="This is a comment",
+            html_url="https://github.com/owner/repo/issues/10#issuecomment-999",
+            user_login="dave",
+        )
+        mock_issue.create_comment.return_value = mock_comment
+
+        result = github_client.add_issue_comment(issue_number=10, comment_text="This is a comment")
+
+        assert result["id"] == 999
+        assert result["body"] == "This is a comment"
+        assert result["url"] == "https://github.com/owner/repo/issues/10#issuecomment-999"
+        assert result["created_at"] == "2024-02-10T09:30:00"
+        assert result["user_login"] == "dave"
+        mock_issue.create_comment.assert_called_once_with("This is a comment")
+
+    def test_add_issue_comment_raises_value_error_for_missing_issue(self, client_and_repo):
+        """add_issue_comment() raises ValueError with a descriptive message when the issue is gone."""
+        github_client, mock_repo = client_and_repo
+        mock_repo.get_issue.side_effect = UnknownObjectException(404, "Not Found", {})
+
+        with pytest.raises(ValueError, match="Issue #404 not found"):
+            github_client.add_issue_comment(issue_number=404, comment_text="Hello")
+
+
+# ── close_issue ───────────────────────────────────────────────────────────────
+
+
+class TestCloseIssue:
+    """Tests for GitHubClient.close_issue()."""
+
+    def test_close_issue_calls_edit_with_closed_state_and_returns_updated_dict(
+        self, client_and_repo
+    ):
+        """close_issue() calls issue.edit(state='closed') and returns the re-fetched issue dict."""
+        github_client, mock_repo = client_and_repo
+
+        mock_open_issue = _make_mock_issue(number=20, state="open")
+        mock_closed_issue = _make_mock_issue(number=20, state="closed")
+
+        # First call from close_issue() to get the issue; second call re-fetches after edit.
+        mock_repo.get_issue.side_effect = [mock_open_issue, mock_closed_issue]
+
+        result = github_client.close_issue(issue_number=20)
+
+        mock_open_issue.edit.assert_called_once_with(state="closed")
+        assert result["state"] == "closed"
+        assert result["number"] == 20
+
+    def test_close_issue_raises_value_error_for_missing_issue(self, client_and_repo):
+        """close_issue() raises ValueError with a descriptive message for a non-existent issue."""
+        github_client, mock_repo = client_and_repo
+        mock_repo.get_issue.side_effect = UnknownObjectException(404, "Not Found", {})
+
+        with pytest.raises(ValueError, match="Issue #99 not found"):
+            github_client.close_issue(issue_number=99)
