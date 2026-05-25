@@ -29,5 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Fixed
+- **Local startup no longer fails opening SQLite** — The default database path now points to `./gitdiscord.db`, and SQLite parent folders are created automatically when a nested `DATABASE_PATH` is configured.
 
 ### Removed

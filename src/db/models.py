@@ -6,6 +6,7 @@ factory and table-creation helpers used at startup.
 """
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import DateTime, Integer, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped
@@ -80,6 +81,25 @@ class NlpChannel(Base):
 
 # ── Engine & schema helpers ───────────────────────────────────────────────────
 
+def _ensure_sqlite_parent_directory(database_path: str) -> None:
+    """
+    Create the folder that will hold a file-backed SQLite database.
+
+    SQLite creates the database file automatically, but it will not create a
+    missing parent folder. Creating that folder here makes first-run setup work
+    on developer machines and deployments that mount an empty data directory.
+    """
+    if database_path == ":memory:":
+        return
+
+    database_file_path = Path(database_path).expanduser()
+    database_folder_path = database_file_path.parent
+    if str(database_folder_path) == ".":
+        return
+
+    database_folder_path.mkdir(parents=True, exist_ok=True)
+
+
 def get_engine(database_path: str):
     """
     Create and return a SQLAlchemy engine pointed at the given SQLite file.
@@ -96,6 +116,8 @@ def get_engine(database_path: str):
     Returns:
         A configured SQLAlchemy Engine instance.
     """
+    _ensure_sqlite_parent_directory(database_path)
+
     # The connect_args key is SQLite-specific and prevents "ProgrammingError:
     # SQLite objects created in a thread can only be used in that same thread"
     # when the engine is shared across async contexts.

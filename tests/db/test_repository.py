@@ -50,6 +50,19 @@ CHANNEL_TWO_ID = "444444444444444444"
 CHANNEL_THREE_ID = "555555555555555555"
 
 
+# ── Engine helpers ────────────────────────────────────────────────────────────
+
+
+def test_get_engine_creates_missing_sqlite_parent_directory(tmp_path):
+    """get_engine() creates the database folder so first-run startup succeeds."""
+    database_path = tmp_path / "nested" / "gitdiscord.db"
+
+    database_engine = get_engine(str(database_path))
+    create_all_tables(database_engine)
+
+    assert database_path.exists()
+
+
 # ── create_channel_link ───────────────────────────────────────────────────────
 
 
