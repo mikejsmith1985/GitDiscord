@@ -27,8 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `README.md`: quick-start, Railway deploy steps, slash command reference, NLP mode examples, Docker/ngrok local dev, and architecture diagram
 
 ### Changed
+- **GitHub issue commands now use GitHub App installation auth** — `/link` no longer collects a PAT; API calls are authenticated with `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APP_INSTALLATION_ID`.
 
 ### Fixed
+- **GitHub App errors now pinpoint the failing configuration step** — `/issue` commands now report whether failure is app credential parsing, repo installation mismatch, or installation token creation.
+- **`/issue` commands no longer fail on detached SQLAlchemy link rows** — repo owner/name are copied before session close, preventing “not bound to a Session” runtime errors.
+- **`/issue` commands now return explicit auth/setup errors instead of timing out** — GitHub App client creation failures are surfaced as ephemeral messages so Discord no longer shows “The application did not respond.”
 - **Slash-command sync diagnostics now show exactly what Discord accepted** — Startup logs include local command names and guild sync results so setup issues can be separated from Discord channel permissions.
 - **Slash commands now sync immediately to connected Discord servers** — Startup copies the command tree to each guild and syncs once, so `/link`, `/status`, and issue commands appear without waiting for global command propagation.
 - **Bot startup no longer requires privileged Discord intents by default** — Message Content Intent now stays off unless `ENABLE_MESSAGE_CONTENT_INTENT=true`, so slash commands and webhook notifications can start locally or on Railway without enabling privileged gateway access.

@@ -5,6 +5,8 @@ Provides the /issue command group, letting users list, view, create, comment
 on, and close GitHub issues directly from a linked Discord channel.
 """
 
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -12,6 +14,8 @@ from discord.ext import commands
 from src.db import repository
 from src.formatters.discord_embeds import format_issue_dict
 from src.github import GitHubClient
+
+logger = logging.getLogger(__name__)
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -22,6 +26,7 @@ MAX_ISSUES_DISPLAYED = 10
 
 # Shared footer text to keep all bot-generated embeds visually consistent.
 _FOOTER_TEXT = "GitDiscord"
+GITHUB_COMMAND_SETUP_FAILURE_PREFIX = "❌ GitHub command setup failed:"
 
 
 # ── Cog ───────────────────────────────────────────────────────────────────────
@@ -79,13 +84,20 @@ class IssueCommands(commands.Cog):
             A configured GitHubClient, or None if the channel has no repo link.
         """
         channel_id = str(interaction.channel_id)
+        linked_repo_owner: str | None = None
+        linked_repo_name: str | None = None
 
         # The session is opened synchronously; SQLite queries are fast enough
         # that running them on the event-loop thread is acceptable here.
         with self.bot.get_db_session() as db_session:
             channel_link = repository.get_channel_link(db_session, channel_id)
+            if channel_link is not None:
+                # Copy scalar values before session close so SQLAlchemy does not
+                # attempt detached-object refreshes during command execution.
+                linked_repo_owner = channel_link.repo_owner
+                linked_repo_name = channel_link.repo_name
 
-        if channel_link is None:
+        if linked_repo_owner is None or linked_repo_name is None:
             # Guard: tell the user exactly what to do rather than just saying
             # "no link found", which would leave them guessing.
             await interaction.response.send_message(
@@ -94,11 +106,33 @@ class IssueCommands(commands.Cog):
             )
             return None
 
-        return GitHubClient(
-            personal_access_token=channel_link.github_pat,
-            repo_owner=channel_link.repo_owner,
-            repo_name=channel_link.repo_name,
-        )
+        if not self.bot.has_github_app_configuration():
+            await interaction.response.send_message(
+                "GitHub App credentials are not configured. Set "
+                "`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, and "
+                "`GITHUB_APP_INSTALLATION_ID` before using issue commands.",
+                ephemeral=True,
+            )
+            return None
+
+        try:
+            return GitHubClient(
+                github_app_id=self.bot.github_app_id,
+                github_app_private_key=self.bot.github_app_private_key,
+                github_app_installation_id=self.bot.github_app_installation_id,
+                repo_owner=linked_repo_owner,
+                repo_name=linked_repo_name,
+            )
+        except Exception as github_authentication_error:
+            logger.exception(
+                "Failed to create GitHub client for channel_id=%s",
+                channel_id,
+            )
+            await interaction.response.send_message(
+                f"{GITHUB_COMMAND_SETUP_FAILURE_PREFIX} {github_authentication_error}",
+                ephemeral=True,
+            )
+            return None
 
     # ── /issue list ───────────────────────────────────────────────────────────
 

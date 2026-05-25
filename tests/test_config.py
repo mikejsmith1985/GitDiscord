@@ -37,6 +37,9 @@ def test_settings_defaults_are_applied(monkeypatch):
     assert loaded_settings.database_path == "./gitdiscord.db"
     assert loaded_settings.log_level == "INFO"
     assert loaded_settings.enable_message_content_intent is False
+    assert loaded_settings.github_app_id == ""
+    assert loaded_settings.github_app_private_key == ""
+    assert loaded_settings.github_app_installation_id == ""
 
 
 def test_get_settings_returns_cached_instance(monkeypatch):

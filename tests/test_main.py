@@ -1,9 +1,18 @@
 """Tests for src/main.py — entry point wiring and PORT override logic."""
 
 import os
+from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.bot.client import GitDiscordBot
+from src.bot.commands.issue_commands import (
+    GITHUB_COMMAND_SETUP_FAILURE_PREFIX,
+    IssueCommands,
+)
+from src.bot.commands.link_commands import LinkCommands
 
 
 def test_gitdiscord_bot_disables_message_content_intent_by_default():
@@ -106,6 +115,9 @@ async def test_main_wires_bot_and_webhook_app_together(
     fake_settings.discord_bot_token = "tok"
     fake_settings.webhook_port = 8080
     fake_settings.enable_message_content_intent = False
+    fake_settings.github_app_id = "1234"
+    fake_settings.github_app_private_key = "-----BEGIN PRIVATE KEY-----test-----END PRIVATE KEY-----"
+    fake_settings.github_app_installation_id = "5678"
     mock_get_settings.return_value = fake_settings
 
     fake_bot_instance = MagicMock()
@@ -123,7 +135,72 @@ async def test_main_wires_bot_and_webhook_app_together(
     mock_discord_bot_class.assert_called_once_with(
         db_session_factory=mock_sessionmaker.return_value,
         should_enable_message_content_intent=False,
+        github_app_id="1234",
+        github_app_private_key="-----BEGIN PRIVATE KEY-----test-----END PRIVATE KEY-----",
+        github_app_installation_id="5678",
     )
     mock_create_webhook_app.assert_called_once()
     call_kwargs = mock_create_webhook_app.call_args.kwargs
     assert call_kwargs["discord_bot"] is fake_bot_instance
+
+
+class FakeCommandBot:
+    """Minimal bot test double for command-cog tests."""
+
+    def __init__(self) -> None:
+        self.github_app_id = "123"
+        self.github_app_private_key = "pem"
+        self.github_app_installation_id = "456"
+
+    def has_github_app_configuration(self) -> bool:
+        """Return true so command handlers continue to GitHub client creation."""
+        return True
+
+    @contextmanager
+    def get_db_session(self):
+        """Yield a throwaway session object compatible with cog expectations."""
+        yield MagicMock()
+
+
+@pytest.mark.asyncio
+async def test_get_github_client_returns_error_message_when_authentication_fails():
+    """IssueCommands should respond ephemerally when GitHub client creation fails."""
+    fake_command_bot = FakeCommandBot()
+    issue_commands = IssueCommands(fake_command_bot)
+    interaction = MagicMock()
+    interaction.channel_id = 123456789
+    interaction.response.send_message = AsyncMock()
+
+    with patch(
+        "src.bot.commands.issue_commands.repository.get_channel_link",
+        return_value=SimpleNamespace(repo_owner="owner", repo_name="repo"),
+    ), patch(
+        "src.bot.commands.issue_commands.GitHubClient",
+        side_effect=RuntimeError("invalid app credentials"),
+    ):
+        github_client = await issue_commands._get_github_client(interaction)
+
+    assert github_client is None
+    interaction.response.send_message.assert_awaited_once()
+    sent_message_text = interaction.response.send_message.await_args.args[0]
+    assert GITHUB_COMMAND_SETUP_FAILURE_PREFIX in sent_message_text
+    assert "invalid app credentials" in sent_message_text
+    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+
+
+@pytest.mark.asyncio
+async def test_link_command_persists_guild_and_channel_ids_as_strings():
+    """LinkCommands should persist Discord IDs as strings for stable lookups."""
+    fake_command_bot = FakeCommandBot()
+    link_commands = LinkCommands(fake_command_bot)
+    interaction = MagicMock()
+    interaction.guild_id = 111111111
+    interaction.channel_id = 222222222
+    interaction.response.send_message = AsyncMock()
+
+    with patch("src.bot.commands.link_commands.create_channel_link") as mock_create_channel_link:
+        await LinkCommands.link.callback(link_commands, interaction, "owner/repo")
+
+    mock_create_channel_link.assert_called_once()
+    assert mock_create_channel_link.call_args.kwargs["guild_id"] == "111111111"
+    assert mock_create_channel_link.call_args.kwargs["channel_id"] == "222222222"

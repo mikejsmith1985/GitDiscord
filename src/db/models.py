@@ -26,10 +26,7 @@ class ChannelRepoLink(Base):
     Maps a single Discord channel to a GitHub repository.
 
     One channel may only track one repository at a time, enforced by the
-    unique constraint on channel_id.  The PAT is stored as plain text so the
-    bot can forward it to the GitHub API without an extra decryption step —
-    callers are responsible for ensuring the token is scoped to the minimum
-    required permissions.
+    unique constraint on channel_id.
     """
 
     __tablename__ = "channel_repo_links"
@@ -39,8 +36,8 @@ class ChannelRepoLink(Base):
     channel_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     repo_owner: Mapped[str] = mapped_column(String, nullable=False)
     repo_name: Mapped[str] = mapped_column(String, nullable=False)
-    # PAT kept verbatim — transport security (TLS) protects it in transit;
-    # at-rest encryption is left to the deployment environment.
+    # Legacy column retained for backward compatibility with existing databases.
+    # New GitHub App auth does not rely on per-channel PAT values.
     github_pat: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

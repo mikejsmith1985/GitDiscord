@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     webhook_port: int = 8080
     database_path: str = "./gitdiscord.db"
     enable_message_content_intent: bool = False
+    github_app_id: str = ""
+    github_app_private_key: str = ""
+    github_app_installation_id: str = ""
     log_level: str = "INFO"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

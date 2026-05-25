@@ -58,6 +58,9 @@ class GitDiscordBot(commands.Bot):
         self,
         db_session_factory: sessionmaker,
         should_enable_message_content_intent: bool = False,
+        github_app_id: str = "",
+        github_app_private_key: str = "",
+        github_app_installation_id: str = "",
     ) -> None:
         """
         Initialise the bot with safe Discord intents and the database factory.
@@ -79,6 +82,9 @@ class GitDiscordBot(commands.Bot):
             should_enable_message_content_intent: Whether to request Discord's
                                                  privileged Message Content
                                                  Intent for NLP channel mode.
+            github_app_id: GitHub App ID used for installation-token auth.
+            github_app_private_key: PEM private key for the GitHub App.
+            github_app_installation_id: Installation ID for repo API access.
         """
         required_intents = discord.Intents.default()
         required_intents.message_content = should_enable_message_content_intent
@@ -89,6 +95,9 @@ class GitDiscordBot(commands.Bot):
         )
 
         self._db_session_factory: sessionmaker = db_session_factory
+        self._github_app_id = github_app_id
+        self._github_app_private_key = github_app_private_key
+        self._github_app_installation_id = github_app_installation_id
 
         # Create the NLP handler once at startup and reuse it for every message
         # so we don't allocate a new object per Discord gateway event.
@@ -111,6 +120,29 @@ class GitDiscordBot(commands.Bot):
         explicit and testable.
         """
         return self._db_session_factory
+
+    def has_github_app_configuration(self) -> bool:
+        """Return whether all required GitHub App credentials are configured."""
+        return all([
+            self._github_app_id.strip(),
+            self._github_app_private_key.strip(),
+            self._github_app_installation_id.strip(),
+        ])
+
+    @property
+    def github_app_id(self) -> str:
+        """Expose the configured GitHub App ID for command handlers."""
+        return self._github_app_id
+
+    @property
+    def github_app_private_key(self) -> str:
+        """Expose the configured GitHub App private key for command handlers."""
+        return self._github_app_private_key
+
+    @property
+    def github_app_installation_id(self) -> str:
+        """Expose the configured GitHub App installation ID for command handlers."""
+        return self._github_app_installation_id
 
     # ── Database helpers ──────────────────────────────────────────────────────
 

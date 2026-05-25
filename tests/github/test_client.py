@@ -8,7 +8,7 @@ by the client and the PyGithub calls it delegates to.
 
 import pytest
 from datetime import datetime
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from github import UnknownObjectException
 
@@ -82,17 +82,107 @@ def client_and_repo():
     client methods and assert on the mock_repo interactions.
     """
     mock_repo = MagicMock()
-    with patch("src.github.client.Github") as MockGithubClass:
+    with patch("src.github.client.Auth.AppAuth") as mock_app_auth_class, patch("src.github.client.GithubIntegration") as mock_github_integration_class, patch("src.github.client.Github") as mock_github_class:
+        mock_app_auth = MagicMock()
+        mock_app_auth_class.return_value = mock_app_auth
         mock_github_instance = MagicMock()
-        MockGithubClass.return_value = mock_github_instance
+        mock_github_class.return_value = mock_github_instance
         mock_github_instance.get_repo.return_value = mock_repo
+        mock_github_integration_instance = MagicMock()
+        mock_github_integration_class.return_value = mock_github_integration_instance
+        mock_repo_installation = MagicMock()
+        mock_repo_installation.id = 456
+        mock_github_integration_instance.get_repo_installation.return_value = mock_repo_installation
+        mock_access_token = MagicMock()
+        mock_access_token.token = "installation-token"
+        mock_github_integration_instance.get_access_token.return_value = mock_access_token
 
         github_client = GitHubClient(
-            personal_access_token="fake-pat",
+            github_app_id="123",
+            github_app_private_key="-----BEGIN PRIVATE KEY-----test-----END PRIVATE KEY-----",
+            github_app_installation_id="456",
             repo_owner="owner",
             repo_name="repo",
         )
         yield github_client, mock_repo
+
+
+@patch("src.github.client.GithubIntegration")
+@patch("src.github.client.Auth.AppAuth")
+@patch("src.github.client.Github")
+def test_github_client_uses_installation_access_token(
+    mock_github_class,
+    mock_app_auth_class,
+    mock_github_integration_class,
+):
+    """GitHubClient must use a GitHub App installation token, not a PAT."""
+    mock_github_instance = MagicMock()
+    mock_github_class.return_value = mock_github_instance
+    mock_github_instance.get_repo.return_value = MagicMock()
+    mock_app_auth = MagicMock()
+    mock_app_auth_class.return_value = mock_app_auth
+    mock_github_integration_instance = MagicMock()
+    mock_github_integration_class.return_value = mock_github_integration_instance
+    mock_repo_installation = MagicMock()
+    mock_repo_installation.id = 456
+    mock_github_integration_instance.get_repo_installation.return_value = mock_repo_installation
+    mock_access_token = MagicMock()
+    mock_access_token.token = "generated-installation-token"
+    mock_github_integration_instance.get_access_token.return_value = mock_access_token
+
+    GitHubClient(
+        github_app_id="123",
+        github_app_private_key="-----BEGIN PRIVATE KEY-----test-----END PRIVATE KEY-----",
+        github_app_installation_id="456",
+        repo_owner="owner",
+        repo_name="repo",
+    )
+
+    mock_app_auth_class.assert_called_once_with(
+        app_id=123,
+        private_key="-----BEGIN PRIVATE KEY-----test-----END PRIVATE KEY-----",
+    )
+    mock_github_integration_class.assert_called_once_with(auth=mock_app_auth)
+    mock_github_integration_instance.get_repo_installation.assert_called_once_with("owner", "repo")
+    mock_github_integration_instance.get_access_token.assert_called_once_with(456)
+    mock_github_class.assert_called_once_with("generated-installation-token")
+
+
+@patch("src.github.client.GithubIntegration")
+@patch("src.github.client.Auth.AppAuth")
+def test_github_client_reports_repo_installation_id_mismatch(
+    mock_app_auth_class,
+    mock_github_integration_class,
+):
+    """GitHubClient should report when configured installation id doesn't match repo installation."""
+    mock_app_auth = MagicMock()
+    mock_app_auth_class.return_value = mock_app_auth
+    mock_github_integration_instance = MagicMock()
+    mock_github_integration_class.return_value = mock_github_integration_instance
+    mock_repo_installation = MagicMock()
+    mock_repo_installation.id = 999
+    mock_github_integration_instance.get_repo_installation.return_value = mock_repo_installation
+
+    with pytest.raises(ValueError, match="installation mismatch"):
+        GitHubClient(
+            github_app_id="123",
+            github_app_private_key="-----BEGIN PRIVATE KEY-----test-----END PRIVATE KEY-----",
+            github_app_installation_id="456",
+            repo_owner="owner",
+            repo_name="repo",
+        )
+
+
+def test_github_client_reports_non_integer_installation_id():
+    """GitHubClient should fail fast when installation ID is not numeric."""
+    with pytest.raises(ValueError, match="GITHUB_APP_INSTALLATION_ID must be a valid integer"):
+        GitHubClient(
+            github_app_id="123",
+            github_app_private_key="-----BEGIN PRIVATE KEY-----test-----END PRIVATE KEY-----",
+            github_app_installation_id="not-a-number",
+            repo_owner="owner",
+            repo_name="repo",
+        )
 
 
 # ── list_issues ───────────────────────────────────────────────────────────────

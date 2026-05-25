@@ -78,20 +78,17 @@ class LinkCommands(commands.Cog):
     @app_commands.command(name="link", description="Link this channel to a GitHub repository.")
     @app_commands.describe(
         repo="GitHub repository in owner/repo format (e.g. mikejsmith1985/GitDiscord)",
-        token="GitHub Personal Access Token with repo scope — never shared back to you",
     )
     async def link(
         self,
         interaction: discord.Interaction,
         repo: str,
-        token: str,
     ) -> None:
         """
         Create or update the link between this Discord channel and a GitHub repo.
 
-        The PAT is stored for API calls on behalf of this channel but is never
-        echoed in any response — even ephemerally — to reduce the risk of
-        accidental exposure through screenshots or logs.
+        Uses GitHub App credentials configured for the bot process. Users only
+        provide the repository slug; no personal token is collected per channel.
         """
         isRepoFormatValid = _is_valid_repo_slug(repo)
         if not isRepoFormatValid:
@@ -105,14 +102,23 @@ class LinkCommands(commands.Cog):
 
         repo_owner, repo_name = repo.split("/", maxsplit=1)
 
-        async with self.bot.get_db_session() as session:
+        if not self.bot.has_github_app_configuration():
+            error_embed = _build_error_embed(
+                "❌ GitHub App Not Configured",
+                "This bot is missing `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, "
+                "or `GITHUB_APP_INSTALLATION_ID`. Configure those values and try again.",
+            )
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            return
+
+        with self.bot.get_db_session() as session:
             create_channel_link(
                 session=session,
-                guild_id=interaction.guild_id,
-                channel_id=interaction.channel_id,
+                guild_id=str(interaction.guild_id),
+                channel_id=str(interaction.channel_id),
                 repo_owner=repo_owner,
                 repo_name=repo_name,
-                github_pat=token,
+                github_pat="GITHUB_APP_AUTH",
             )
 
         success_embed = _build_success_embed(
@@ -133,8 +139,11 @@ class LinkCommands(commands.Cog):
         Returns a clear message when no link exists, so users aren't left
         wondering whether the command succeeded.
         """
-        async with self.bot.get_db_session() as session:
-            wasLinkRemoved = delete_channel_link(session=session, channel_id=interaction.channel_id)
+        with self.bot.get_db_session() as session:
+            wasLinkRemoved = delete_channel_link(
+                session=session,
+                channel_id=str(interaction.channel_id),
+            )
 
         if not wasLinkRemoved:
             info_embed = _build_info_embed(
@@ -156,20 +165,23 @@ class LinkCommands(commands.Cog):
     @app_commands.command(name="status", description="Show the GitHub repo currently linked to this channel.")
     async def status(self, interaction: discord.Interaction) -> None:
         """
-        Display the linked repository for this channel without revealing the PAT.
-
-        The PAT is intentionally omitted from this response — it is a secret
-        credential and should never appear in any user-facing output.
+        Display the linked repository for this channel and NLP mode status.
         """
-        async with self.bot.get_db_session() as session:
-            channel_link = get_channel_link(session=session, channel_id=interaction.channel_id)
-            hasNlpEnabled = is_nlp_channel(session=session, channel_id=interaction.channel_id)
+        with self.bot.get_db_session() as session:
+            channel_link = get_channel_link(
+                session=session,
+                channel_id=str(interaction.channel_id),
+            )
+            hasNlpEnabled = is_nlp_channel(
+                session=session,
+                channel_id=str(interaction.channel_id),
+            )
 
         if channel_link is None:
             info_embed = _build_info_embed(
                 "ℹ️ No Repository Linked",
                 "No repo is linked to this channel.\n\n"
-                "Use `/link owner/repo <token>` to connect a GitHub repository.",
+                "Use `/link owner/repo` to connect a GitHub repository.",
             )
             await interaction.response.send_message(embed=info_embed, ephemeral=True)
             return
@@ -194,8 +206,12 @@ class LinkCommands(commands.Cog):
         For example, typing "show open issues" will trigger a GitHub issues query
         without needing a slash command. Useful in dedicated project channels.
         """
-        async with self.bot.get_db_session() as session:
-            enable_nlp_channel(session=session, guild_id=interaction.guild_id, channel_id=interaction.channel_id)
+        with self.bot.get_db_session() as session:
+            enable_nlp_channel(
+                session=session,
+                guild_id=str(interaction.guild_id),
+                channel_id=str(interaction.channel_id),
+            )
 
         success_embed = _build_success_embed(
             "✅ NLP Mode Enabled",
@@ -218,8 +234,11 @@ class LinkCommands(commands.Cog):
         Use this to prevent the bot from misinterpreting regular conversation
         as GitHub commands in general-purpose channels.
         """
-        async with self.bot.get_db_session() as session:
-            disable_nlp_channel(session=session, channel_id=interaction.channel_id)
+        with self.bot.get_db_session() as session:
+            disable_nlp_channel(
+                session=session,
+                channel_id=str(interaction.channel_id),
+            )
 
         success_embed = _build_success_embed(
             "✅ NLP Mode Disabled",

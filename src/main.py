@@ -46,6 +46,9 @@ async def main() -> None:
     discord_bot = GitDiscordBot(
         db_session_factory=db_session_factory,
         should_enable_message_content_intent=settings.enable_message_content_intent,
+        github_app_id=settings.github_app_id,
+        github_app_private_key=settings.github_app_private_key,
+        github_app_installation_id=settings.github_app_installation_id,
     )
 
     # Create FastAPI webhook app — needs the bot reference to post Discord messages

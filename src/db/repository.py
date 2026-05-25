@@ -28,8 +28,8 @@ def create_channel_link(
 
     Because each channel may only point to one repository, calling this
     function for a channel that already has a link replaces the existing
-    record (upsert).  This lets users re-run the setup command to rotate
-    their PAT or switch repositories without having to unlink first.
+    record (upsert).  This lets users re-run setup to switch repositories
+    without having to unlink first.
 
     Args:
         session:    An open SQLAlchemy Session.
@@ -37,7 +37,7 @@ def create_channel_link(
         channel_id: Discord snowflake ID of the channel being linked.
         repo_owner: GitHub user or organisation that owns the repository.
         repo_name:  GitHub repository name (without the owner prefix).
-        github_pat: Personal Access Token with the required GitHub scopes.
+        github_pat: Legacy credential field kept for backward compatibility.
 
     Returns:
         The newly created or updated ChannelRepoLink ORM instance.

@@ -5,10 +5,20 @@ Wraps PyGithub to provide issue management operations as plain dicts,
 keeping the Discord bot layer fully decoupled from the GitHub library.
 """
 
-from github import Github, GithubException, UnknownObjectException
+from github import Auth, Github, GithubException, GithubIntegration, UnknownObjectException
 
 # Cap results to keep Discord message payloads readable and within embed limits.
 MAX_ISSUES_PER_PAGE = 25
+
+
+def _parse_required_integer(raw_value: str, setting_name: str) -> int:
+    """Parse an integer setting and raise a clear ValueError when invalid."""
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError) as conversion_error:
+        raise ValueError(
+            f"{setting_name} must be a valid integer. Current value: {raw_value!r}"
+        ) from conversion_error
 
 
 def _issue_to_dict(issue) -> dict:
@@ -53,7 +63,9 @@ class GitHubClient:
 
     def __init__(
         self,
-        personal_access_token: str,
+        github_app_id: str,
+        github_app_private_key: str,
+        github_app_installation_id: str,
         repo_owner: str,
         repo_name: str,
     ) -> None:
@@ -61,11 +73,62 @@ class GitHubClient:
         Initialise the client and resolve the target repository.
 
         Args:
-            personal_access_token: A GitHub PAT with repo scope.
+            github_app_id: GitHub App ID from the app settings page.
+            github_app_private_key: PEM private key generated for the app.
+            github_app_installation_id: Installation ID authorizing repo access.
             repo_owner: The GitHub username or organisation that owns the repo.
             repo_name: The repository name (without the owner prefix).
         """
-        self._github = Github(personal_access_token)
+        parsed_github_app_id = _parse_required_integer(
+            github_app_id,
+            "GITHUB_APP_ID",
+        )
+        parsed_github_app_installation_id = _parse_required_integer(
+            github_app_installation_id,
+            "GITHUB_APP_INSTALLATION_ID",
+        )
+
+        try:
+            github_app_auth = Auth.AppAuth(
+                app_id=parsed_github_app_id,
+                private_key=github_app_private_key,
+            )
+            github_integration_client = GithubIntegration(auth=github_app_auth)
+            repo_installation = github_integration_client.get_repo_installation(
+                repo_owner,
+                repo_name,
+            )
+        except GithubException as github_exception:
+            raise ValueError(
+                "GitHub App setup failed during app/repo verification "
+                f"(status={github_exception.status}): {github_exception.data}"
+            ) from github_exception
+        except Exception as github_setup_error:
+            raise ValueError(
+                "GitHub App setup failed while loading app credentials. "
+                "Verify GITHUB_APP_PRIVATE_KEY uses the full PEM content."
+            ) from github_setup_error
+
+        if repo_installation.id != parsed_github_app_installation_id:
+            raise ValueError(
+                "GitHub App installation mismatch: configured "
+                f"GITHUB_APP_INSTALLATION_ID={parsed_github_app_installation_id}, "
+                f"but repo {repo_owner}/{repo_name} is installed as "
+                f"{repo_installation.id}."
+            )
+
+        try:
+            installation_access_token = github_integration_client.get_access_token(
+                parsed_github_app_installation_id
+            )
+        except GithubException as github_exception:
+            raise ValueError(
+                "GitHub App token creation failed for configured installation "
+                f"{parsed_github_app_installation_id} (status={github_exception.status}): "
+                f"{github_exception.data}"
+            ) from github_exception
+
+        self._github = Github(installation_access_token.token)
         self._repo_owner = repo_owner
         self._repo_name = repo_name
 

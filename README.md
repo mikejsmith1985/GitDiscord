@@ -22,7 +22,7 @@
    git clone https://github.com/mikejsmith1985/GitDiscord.git
    cd GitDiscord
    cp .env.example .env
-   # Edit .env with your DISCORD_BOT_TOKEN and WEBHOOK_SECRET
+   # Edit .env with your Discord token, webhook secret, and GitHub App credentials
    ```
 
 3. **Install and run**
@@ -51,7 +51,7 @@
 
 | Command | Description |
 |---------|-------------|
-| `/link <repo> <token>` | Link this channel to a GitHub repo (`owner/repo`) with a PAT |
+| `/link <repo>` | Link this channel to a GitHub repo (`owner/repo`) using configured GitHub App auth |
 | `/unlink` | Remove this channel's repo link |
 | `/status` | Show the linked repo for this channel |
 | `/nlp-enable` | Enable natural language commands in this channel |
