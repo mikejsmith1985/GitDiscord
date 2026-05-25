@@ -1,0 +1,18 @@
+{
+  "version": "1.0.0",
+  "projectName": "DiscordLink",
+  "projectType": "",
+  "qualityMode": "best",
+  "enabledModules": ["copilot-instructions", "branching-strategy", "code-quality", "testing-standards", "pr-workflow", "documentation", "multi-agent", "workflow-enforcer", "git-hooks", "pr-template", "copilot-agent-setup", "forge-vault", "adaptive-build-environments", "forge-release-process", "sequential-tasks"],
+  "tutorSettings": {
+
+  },
+  "prReviewSettings": {
+    "strategy": "tutor-and-agent",
+    "autoTrigger": true,
+    "requireChangelog": true,
+    "agentStrictness": "standard",
+    "agentFocusAreas": ["naming", "complexity", "tests", "architecture", "security"]
+  },
+  "appliedAt": "2026-05-25"
+}
