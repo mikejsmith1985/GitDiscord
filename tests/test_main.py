@@ -23,6 +23,26 @@ def test_gitdiscord_bot_can_enable_message_content_intent_for_nlp_mode():
     assert bot.intents.message_content is True
 
 
+async def test_gitdiscord_bot_syncs_slash_commands_to_connected_guilds(monkeypatch):
+    """on_ready() must guild-sync commands so Discord shows them immediately."""
+    bot = GitDiscordBot(db_session_factory=MagicMock())
+    fake_guild = MagicMock()
+    fake_guild.id = 123456789
+    fake_user = MagicMock()
+    fake_user.id = 987654321
+
+    monkeypatch.setattr(type(bot), "guilds", property(lambda _bot_instance: [fake_guild]))
+    monkeypatch.setattr(type(bot), "user", property(lambda _bot_instance: fake_user))
+    bot.tree.copy_global_to = MagicMock()
+    bot.tree.sync = AsyncMock(return_value=["link", "status"])
+
+    await bot.on_ready()
+    await bot.on_ready()
+
+    bot.tree.copy_global_to.assert_called_once_with(guild=fake_guild)
+    bot.tree.sync.assert_awaited_once_with(guild=fake_guild)
+
+
 def test_railway_port_env_var_overrides_settings_webhook_port(monkeypatch):
     """When Railway injects PORT, main() must bind uvicorn to that port, not webhook_port."""
     monkeypatch.setenv("PORT", "9000")

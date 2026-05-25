@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Fixed
+- **Slash commands now sync immediately to connected Discord servers** — Startup copies the command tree to each guild and syncs once, so `/link`, `/status`, and issue commands appear without waiting for global command propagation.
 - **Bot startup no longer requires privileged Discord intents by default** — Message Content Intent now stays off unless `ENABLE_MESSAGE_CONTENT_INTENT=true`, so slash commands and webhook notifications can start locally or on Railway without enabling privileged gateway access.
 - **Local startup no longer fails opening SQLite** — The default database path now points to `./gitdiscord.db`, and SQLite parent folders are created automatically when a nested `DATABASE_PATH` is configured.
 

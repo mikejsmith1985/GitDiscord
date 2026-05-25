@@ -92,6 +92,7 @@ class GitDiscordBot(commands.Bot):
             db_session_factory=db_session_factory,
             discord_bot=self,
         )
+        self._has_synced_application_commands = False
 
     # ── Properties ────────────────────────────────────────────────────────────
 
@@ -184,6 +185,35 @@ class GitDiscordBot(commands.Bot):
                 )
                 raise
 
+    async def _sync_application_commands(self) -> None:
+        """
+        Publish loaded slash commands to Discord after guilds are visible.
+
+        Global slash-command sync can take a long time to appear in the client.
+        Copying the same command tree to each connected guild gives immediate
+        feedback during local setup and avoids users thinking the bot is broken.
+        """
+        if self._has_synced_application_commands:
+            return
+
+        connected_guilds = list(self.guilds)
+        if not connected_guilds:
+            synced_commands = await self.tree.sync()
+            logger.info("Synced %d global slash command(s).", len(synced_commands))
+            self._has_synced_application_commands = True
+            return
+
+        for connected_guild in connected_guilds:
+            self.tree.copy_global_to(guild=connected_guild)
+            synced_commands = await self.tree.sync(guild=connected_guild)
+            logger.info(
+                "Synced %d slash command(s) to guild_id=%s.",
+                len(synced_commands),
+                connected_guild.id,
+            )
+
+        self._has_synced_application_commands = True
+
     async def on_ready(self) -> None:
         """
         Log confirmation that the bot is connected and ready to serve requests.
@@ -200,6 +230,7 @@ class GitDiscordBot(commands.Bot):
             self.user.id,  # type: ignore[union-attr]  # user is guaranteed non-None when on_ready fires
             guild_count,
         )
+        await self._sync_application_commands()
 
     async def on_message(self, message: discord.Message) -> None:
         """
