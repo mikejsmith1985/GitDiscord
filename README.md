@@ -31,6 +31,10 @@
    python src/main.py
    ```
 
+   Keep `ENABLE_MESSAGE_CONTENT_INTENT=false` unless you explicitly enable
+   Discord's Message Content Intent in the Developer Portal. Slash commands and
+   GitHub webhook notifications do not need that privileged gateway intent.
+
 ## Deploy to Railway
 
 1. Push this repo to GitHub (already done)
@@ -61,6 +65,9 @@
 ## Natural Language (NLP Mode)
 
 After running `/nlp-enable` in a channel, you can type plain English:
+
+NLP mode requires `ENABLE_MESSAGE_CONTENT_INTENT=true` and the matching
+privileged intent enabled for the bot in the Discord Developer Portal.
 
 | You type | Action |
 |----------|--------|

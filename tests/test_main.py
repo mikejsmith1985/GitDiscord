@@ -3,6 +3,25 @@
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from src.bot.client import GitDiscordBot
+
+
+def test_gitdiscord_bot_disables_message_content_intent_by_default():
+    """Bot startup must not require Discord privileged intents for slash-command usage."""
+    bot = GitDiscordBot(db_session_factory=MagicMock())
+
+    assert bot.intents.message_content is False
+
+
+def test_gitdiscord_bot_can_enable_message_content_intent_for_nlp_mode():
+    """NLP deployments can opt into message content after enabling it in Discord."""
+    bot = GitDiscordBot(
+        db_session_factory=MagicMock(),
+        should_enable_message_content_intent=True,
+    )
+
+    assert bot.intents.message_content is True
+
 
 def test_railway_port_env_var_overrides_settings_webhook_port(monkeypatch):
     """When Railway injects PORT, main() must bind uvicorn to that port, not webhook_port."""
@@ -50,6 +69,7 @@ async def test_main_wires_bot_and_webhook_app_together(
     fake_settings.database_path = "./test.db"
     fake_settings.discord_bot_token = "tok"
     fake_settings.webhook_port = 8080
+    fake_settings.enable_message_content_intent = False
     mock_get_settings.return_value = fake_settings
 
     fake_bot_instance = MagicMock()
@@ -64,6 +84,10 @@ async def test_main_wires_bot_and_webhook_app_together(
     await main()
 
     # The same bot instance must be forwarded to the webhook app factory
+    mock_discord_bot_class.assert_called_once_with(
+        db_session_factory=mock_sessionmaker.return_value,
+        should_enable_message_content_intent=False,
+    )
     mock_create_webhook_app.assert_called_once()
     call_kwargs = mock_create_webhook_app.call_args.kwargs
     assert call_kwargs["discord_bot"] is fake_bot_instance

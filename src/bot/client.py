@@ -50,18 +50,21 @@ class GitDiscordBot(commands.Bot):
     receiving gateway events.
     """
 
-    def __init__(self, db_session_factory: sessionmaker) -> None:
+    def __init__(
+        self,
+        db_session_factory: sessionmaker,
+        should_enable_message_content_intent: bool = False,
+    ) -> None:
         """
-        Initialise the bot with privileged Discord intents and the database factory.
+        Initialise the bot with safe Discord intents and the database factory.
 
-        message_content is a privileged intent needed so the NLP listener can
-        read the full text of messages in opted-in channels.  Without it,
-        discord.py 2.x delivers empty content strings, silently breaking
-        natural-language command parsing.
+        Slash commands and GitHub webhook notifications do not need privileged
+        gateway access.  Message Content stays disabled by default so first-run
+        bot setup works without extra Discord Developer Portal toggles.
 
-        Note: message_content must also be enabled in the Discord Developer
-        Portal under Bot → Privileged Gateway Intents, or the intent flag here
-        has no effect.
+        Set should_enable_message_content_intent only after enabling Message
+        Content Intent in the Discord Developer Portal.  That opt-in is required
+        for NLP channels that read ordinary user messages.
 
         Args:
             db_session_factory: A configured SQLAlchemy sessionmaker bound to
@@ -69,12 +72,12 @@ class GitDiscordBot(commands.Bot):
                                  share this factory so each request opens its
                                  own short-lived session, preventing hidden
                                  transaction leaks across command invocations.
+            should_enable_message_content_intent: Whether to request Discord's
+                                                 privileged Message Content
+                                                 Intent for NLP channel mode.
         """
-        # Build the intent set starting from the defaults (guilds, members,
-        # messages, reactions, etc.) and then opt into the privileged
-        # message_content intent on top.
         required_intents = discord.Intents.default()
-        required_intents.message_content = True
+        required_intents.message_content = should_enable_message_content_intent
 
         super().__init__(
             command_prefix=DUMMY_COMMAND_PREFIX,

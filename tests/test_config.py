@@ -36,6 +36,7 @@ def test_settings_defaults_are_applied(monkeypatch):
     assert loaded_settings.webhook_port == 8080
     assert loaded_settings.database_path == "./gitdiscord.db"
     assert loaded_settings.log_level == "INFO"
+    assert loaded_settings.enable_message_content_intent is False
 
 
 def test_get_settings_returns_cached_instance(monkeypatch):

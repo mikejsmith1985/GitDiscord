@@ -43,7 +43,10 @@ async def main() -> None:
     db_session_factory = sessionmaker(bind=database_engine)
 
     # Create bot instance — cogs receive the session factory so they can query the DB
-    discord_bot = GitDiscordBot(db_session_factory=db_session_factory)
+    discord_bot = GitDiscordBot(
+        db_session_factory=db_session_factory,
+        should_enable_message_content_intent=settings.enable_message_content_intent,
+    )
 
     # Create FastAPI webhook app — needs the bot reference to post Discord messages
     webhook_app = create_webhook_app(
