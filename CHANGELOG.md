@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Railway start command** (`railway.toml`): Changed `python src/main.py` to `python -m src.main` to fix `ModuleNotFoundError: No module named 'src'` on startup — running the file directly set Python's module search path to `/app/src` instead of `/app`, breaking all internal imports
+
 ### Added
 - **NLP command parser** (`src/nlp/command_parser.py`): `parse_command()` pure function recognises list, view, create, comment, close, and unknown actions from natural-language Discord messages; `NlpMessageHandler` async class dispatches parsed commands to `GitHubClient` and replies with Discord embeds; `_normalize_issue_dict_for_embed()` bridges GitHubClient dict shape with `format_issue_dict()`; 46-test suite in `tests/nlp/test_command_parser.py`
 - **NLP on_message wiring** (`src/bot/client.py`): `GitDiscordBot.on_message` routes guild messages through `NlpMessageHandler` while keeping prefix commands working via `process_commands()`
