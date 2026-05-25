@@ -34,6 +34,10 @@ EXTENSION_MODULE_PATHS: list[str] = [
     "src.bot.commands.issue_commands",
 ]
 
+NO_SLASH_COMMANDS_LOADED_MESSAGE = (
+    "No local slash commands are loaded; Discord cannot display /link or /status."
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -185,6 +189,31 @@ class GitDiscordBot(commands.Bot):
                 )
                 raise
 
+        loaded_command_names = self._get_loaded_application_command_names()
+        if loaded_command_names:
+            logger.info("Loaded slash commands: %s", ", ".join(loaded_command_names))
+        else:
+            logger.error(NO_SLASH_COMMANDS_LOADED_MESSAGE)
+
+    def _get_loaded_application_command_names(self) -> list[str]:
+        """
+        Return slash-command names currently registered in the local command tree.
+
+        This gives startup logs a concrete list of commands before Discord sync
+        runs, which makes setup failures much easier to diagnose from screenshots.
+        """
+        return sorted(command.name for command in self.tree.get_commands())
+
+    @staticmethod
+    def _get_synced_application_command_names(synced_commands: list) -> list[str]:
+        """
+        Return command names acknowledged by Discord after a sync operation.
+
+        Discord returns command objects from sync(). Logging their names confirms
+        whether the remote API accepted the commands the bot expected to publish.
+        """
+        return sorted(command.name for command in synced_commands)
+
     async def _sync_application_commands(self) -> None:
         """
         Publish loaded slash commands to Discord after guilds are visible.
@@ -199,17 +228,24 @@ class GitDiscordBot(commands.Bot):
         connected_guilds = list(self.guilds)
         if not connected_guilds:
             synced_commands = await self.tree.sync()
-            logger.info("Synced %d global slash command(s).", len(synced_commands))
+            synced_command_names = self._get_synced_application_command_names(synced_commands)
+            logger.info(
+                "Synced %d global slash command(s): %s",
+                len(synced_command_names),
+                ", ".join(synced_command_names) or "(none)",
+            )
             self._has_synced_application_commands = True
             return
 
         for connected_guild in connected_guilds:
             self.tree.copy_global_to(guild=connected_guild)
             synced_commands = await self.tree.sync(guild=connected_guild)
+            synced_command_names = self._get_synced_application_command_names(synced_commands)
             logger.info(
-                "Synced %d slash command(s) to guild_id=%s.",
-                len(synced_commands),
+                "Synced %d slash command(s) to guild_id=%s: %s",
+                len(synced_command_names),
                 connected_guild.id,
+                ", ".join(synced_command_names) or "(none)",
             )
 
         self._has_synced_application_commands = True

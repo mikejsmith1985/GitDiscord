@@ -34,13 +34,29 @@ async def test_gitdiscord_bot_syncs_slash_commands_to_connected_guilds(monkeypat
     monkeypatch.setattr(type(bot), "guilds", property(lambda _bot_instance: [fake_guild]))
     monkeypatch.setattr(type(bot), "user", property(lambda _bot_instance: fake_user))
     bot.tree.copy_global_to = MagicMock()
-    bot.tree.sync = AsyncMock(return_value=["link", "status"])
+    synced_link_command = MagicMock()
+    synced_link_command.name = "link"
+    synced_status_command = MagicMock()
+    synced_status_command.name = "status"
+    bot.tree.sync = AsyncMock(return_value=[synced_link_command, synced_status_command])
 
     await bot.on_ready()
     await bot.on_ready()
 
     bot.tree.copy_global_to.assert_called_once_with(guild=fake_guild)
     bot.tree.sync.assert_awaited_once_with(guild=fake_guild)
+
+
+def test_gitdiscord_bot_reports_loaded_application_command_names():
+    """Startup diagnostics should list local slash commands before Discord sync."""
+    bot = GitDiscordBot(db_session_factory=MagicMock())
+    fake_link_command = MagicMock()
+    fake_link_command.name = "link"
+    fake_status_command = MagicMock()
+    fake_status_command.name = "status"
+    bot.tree.get_commands = MagicMock(return_value=[fake_status_command, fake_link_command])
+
+    assert bot._get_loaded_application_command_names() == ["link", "status"]
 
 
 def test_railway_port_env_var_overrides_settings_webhook_port(monkeypatch):
