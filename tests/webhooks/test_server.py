@@ -533,6 +533,37 @@ def test_webhook_fetches_channel_when_discord_cache_misses(monkeypatch):
     }
 
 
+def test_debug_channel_endpoint_does_not_call_discord_api(monkeypatch):
+    """Unauthenticated debug checks must not consume Discord API rate limits."""
+    monkeypatch.setenv("WEBHOOK_SECRET", _TEST_SECRET)
+
+    from contextlib import contextmanager
+    from unittest.mock import AsyncMock
+
+    class CacheMissDiscordBot:
+        """Discord bot stub where cache lookup misses and API fetch is observable."""
+
+        def __init__(self) -> None:
+            self.fetch_channel = AsyncMock()
+
+        def get_channel(self, channel_id):
+            return None
+
+    @contextmanager
+    def stub_session_factory():
+        yield None
+
+    discord_bot = CacheMissDiscordBot()
+    app = create_webhook_app(discord_bot, stub_session_factory)
+    client = TestClient(app)
+
+    response = client.get("/debug/channels/222222222222222222")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "error"
+    assert discord_bot.fetch_channel.await_count == 0
+
+
 # ── Startup safety ─────────────────────────────────────────────────────────────
 
 def test_create_webhook_app_raises_without_secret(monkeypatch):

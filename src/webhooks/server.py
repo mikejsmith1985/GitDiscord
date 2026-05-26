@@ -203,7 +203,7 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
     async def debug_channel(channel_id: str):
         """Check whether the bot can resolve and send embeds to a Discord channel."""
         try:
-            channel = await _resolve_discord_channel(discord_bot, channel_id, "debug")
+            numeric_channel_id = int(channel_id)
         except ValueError as value_error:
             return {
                 "status": "error",
@@ -211,6 +211,9 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
                 "error": str(value_error),
             }
 
+        # This public endpoint intentionally avoids fetch_channel() so unauthenticated
+        # diagnostics cannot consume the bot's Discord API rate-limit budget.
+        channel = discord_bot.get_channel(numeric_channel_id)
         if channel is None:
             return {
                 "status": "error",
@@ -218,8 +221,9 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
                 "issue": "Bot cannot see this channel. It may not be a member or the channel ID is invalid.",
             }
 
+        guild_member = channel.guild.me if channel.guild else None
         channel_permissions = (
-            channel.permissions_for(channel.guild.me) if channel.guild else None
+            channel.permissions_for(guild_member) if guild_member is not None else None
         )
         return {
             "status": "ok",

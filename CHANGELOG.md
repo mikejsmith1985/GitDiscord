@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Cold Discord channel cache drops** (`src/webhooks/server.py`): Webhook delivery now falls back from `discord_bot.get_channel()` to `discord_bot.fetch_channel()` so GitHub events are not silently dropped when Railway accepts webhooks before Discord's gateway cache is fully warm.
+- **Public channel diagnostics safety** (`src/webhooks/server.py`): `/debug/channels/{channel_id}` now stays cache-only so unauthenticated diagnostic requests cannot consume Discord API rate limits, and permission reporting tolerates a cold guild-member cache.
 - **Database path default** (`src/config.py`): Changed default `DATABASE_PATH` from `./gitdiscord.db` to `./data/gitdiscord.db` so the container's `appuser` can write the SQLite file — the container only has write access to `/app/data`, not `/app`
 
 ### Fixed
