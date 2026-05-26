@@ -4,7 +4,7 @@
 
 ## Features
 
-- **GitHub → Discord**: Push commits, PR opened/merged/review-requested posted as rich embeds
+- **GitHub → Discord**: Push commits, PR lifecycle events, issue lifecycle updates, issue comments, and commit comments posted as rich embeds
 - **Discord → GitHub**: Full issue management via slash commands and thread-based issue drafts
 - **Split channel routing**: Keep issue commands in one channel and send webhook notifications to another
 - **Natural language**: Type `create issue: Fix login bug` or `show issue #5` in designated channels
@@ -46,7 +46,7 @@
    - Payload URL: `https://<railway-url>/webhook/github`
    - Content type: `application/json`
    - Secret: your `WEBHOOK_SECRET` value
-   - Events: select **Pushes** and **Pull requests**
+   - Events: select **Pushes**, **Pull requests**, **Issues**, **Issue comments**, and **Commit comments**
 
 ## Slash Commands
 

@@ -7,8 +7,9 @@ Exposes two HTTP endpoints:
 
 Every inbound webhook is validated against an HMAC-SHA256 signature derived
 from the WEBHOOK_SECRET environment variable before any business logic runs.
-Validated events are routed to the appropriate handler (push, pull_request)
-which formats a Discord embed and sends it to the linked channel.
+Validated events are routed to the appropriate handler (push, pull_request,
+issues, issue_comment, commit_comment) which formats a Discord embed and sends
+it to the linked channel.
 """
 
 import hashlib
@@ -23,8 +24,13 @@ from fastapi import FastAPI, Request, Response
 from sqlalchemy.orm import Session
 
 from src.db import repository
+from src.webhooks.handlers.pr_handler import (
+    handle_commit_comment_event,
+    handle_issue_comment_event,
+    handle_issue_event,
+    handle_pr_event,
+)
 from src.webhooks.handlers.push_handler import handle_push_event
-from src.webhooks.handlers.pr_handler import handle_pr_event
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +239,12 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
             await handle_push_event(payload, _channel_send_fn)
         elif event_type == "pull_request":
             await handle_pr_event(payload, _channel_send_fn)
+        elif event_type == "issues":
+            await handle_issue_event(payload, _channel_send_fn)
+        elif event_type == "issue_comment":
+            await handle_issue_comment_event(payload, _channel_send_fn)
+        elif event_type == "commit_comment":
+            await handle_commit_comment_event(payload, _channel_send_fn)
         else:
             # Return 200 for unrecognised events so GitHub does not retry them.
             logger.debug("Ignoring unsupported GitHub event type: %s", event_type)

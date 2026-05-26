@@ -296,3 +296,85 @@ def format_issue_dict(issue: dict, action: str = "opened") -> discord.Embed:
     )
     embed.set_footer(text=_FOOTER_TEXT)
     return embed
+
+
+def format_issue_comment_event(payload: dict) -> discord.Embed:
+    """
+    Formats a GitHub 'issue_comment' webhook event as a Discord embed.
+
+    Shows which issue received the comment, who wrote it, the webhook action,
+    and a preview of the comment body with a direct link to the comment.
+
+    Color: discord.Color.blurple()
+    """
+    issue_dict = payload.get("issue", {})
+    comment_dict = payload.get("comment", {})
+    action = payload.get("action", "created")
+
+    issue_number = issue_dict.get("number", 0)
+    issue_title = issue_dict.get("title", "Untitled Issue")
+    commenter_login = comment_dict.get("user", {}).get("login", "unknown")
+    comment_url = comment_dict.get("html_url", "")
+    comment_body = comment_dict.get("body") or ""
+    comment_preview = (
+        comment_body[:MAX_BODY_PREVIEW_CHARS] + "…"
+        if len(comment_body) > MAX_BODY_PREVIEW_CHARS
+        else comment_body
+    )
+
+    description_lines = [
+        f"**Action:** {action}",
+        f"**Author:** {commenter_login}",
+        f"**Issue #{issue_number}:** {issue_title}",
+    ]
+    if comment_preview:
+        description_lines += ["", comment_preview]
+
+    embed = discord.Embed(
+        title="💬 Issue Comment",
+        description="\n".join(description_lines),
+        color=discord.Color.blurple(),
+        url=comment_url or None,
+    )
+    embed.set_footer(text=_FOOTER_TEXT)
+    return embed
+
+
+def format_commit_comment_event(payload: dict) -> discord.Embed:
+    """
+    Formats a GitHub 'commit_comment' webhook event as a Discord embed.
+
+    Shows the action, comment author, short commit SHA, and a preview of the
+    comment body with a link to the comment on GitHub.
+
+    Color: discord.Color.dark_teal()
+    """
+    comment_dict = payload.get("comment", {})
+    action = payload.get("action", "created")
+    commenter_login = comment_dict.get("user", {}).get("login", "unknown")
+    commit_sha_full = comment_dict.get("commit_id", "")
+    commit_sha_short = commit_sha_full[:7] if commit_sha_full else "unknown"
+    comment_url = comment_dict.get("html_url", "")
+    comment_body = comment_dict.get("body") or ""
+    comment_preview = (
+        comment_body[:MAX_BODY_PREVIEW_CHARS] + "…"
+        if len(comment_body) > MAX_BODY_PREVIEW_CHARS
+        else comment_body
+    )
+
+    description_lines = [
+        f"**Action:** {action}",
+        f"**Author:** {commenter_login}",
+        f"**Commit:** `{commit_sha_short}`",
+    ]
+    if comment_preview:
+        description_lines += ["", comment_preview]
+
+    embed = discord.Embed(
+        title="🧵 Commit Comment",
+        description="\n".join(description_lines),
+        color=discord.Color.dark_teal(),
+        url=comment_url or None,
+    )
+    embed.set_footer(text=_FOOTER_TEXT)
+    return embed

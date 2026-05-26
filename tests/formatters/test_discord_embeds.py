@@ -16,6 +16,8 @@ from src.formatters.discord_embeds import (
     format_pr_merged,
     format_pr_closed_without_merge,
     format_issue_dict,
+    format_issue_comment_event,
+    format_commit_comment_event,
     MAX_COMMITS_SHOWN,
     MAX_BODY_PREVIEW_CHARS,
 )
@@ -442,3 +444,80 @@ class TestFormatIssueDict:
 
         assert "enhancement" in embed.description
         assert "help wanted" in embed.description
+
+
+# ── Comment event formatters ───────────────────────────────────────────────────
+
+
+class TestFormatIssueCommentEvent:
+    """Tests for format_issue_comment_event() formatter function."""
+
+    def test_issue_comment_embed_includes_action_and_author(self):
+        """Issue comment embeds show action and commenter for quick triage."""
+        payload = {
+            "action": "created",
+            "issue": {"number": 4, "title": "Flaky test"},
+            "comment": {
+                "html_url": "https://github.com/org/repo/issues/4#issuecomment-1",
+                "body": "I can reproduce this reliably.",
+                "user": {"login": "alice"},
+            },
+        }
+
+        embed = format_issue_comment_event(payload)
+
+        assert "created" in embed.description
+        assert "alice" in embed.description
+        assert "Flaky test" in embed.description
+        assert embed.url == "https://github.com/org/repo/issues/4#issuecomment-1"
+
+    def test_issue_comment_embed_has_blurple_color_and_footer(self):
+        """Issue comment embeds use blurple and include GitDiscord attribution."""
+        payload = {
+            "action": "edited",
+            "issue": {"number": 11, "title": "Docs typo"},
+            "comment": {"body": "Updated wording", "user": {"login": "bob"}},
+        }
+
+        embed = format_issue_comment_event(payload)
+
+        assert embed.color == discord.Color.blurple()
+        assert embed.footer.text == EXPECTED_FOOTER_TEXT
+
+
+class TestFormatCommitCommentEvent:
+    """Tests for format_commit_comment_event() formatter function."""
+
+    def test_commit_comment_embed_includes_short_sha_and_author(self):
+        """Commit comment embeds show the short commit SHA and author login."""
+        payload = {
+            "action": "created",
+            "comment": {
+                "commit_id": "abc1234def5678",
+                "html_url": "https://github.com/org/repo/commit/abc1234#commitcomment-1",
+                "body": "Please split this function.",
+                "user": {"login": "carol"},
+            },
+        }
+
+        embed = format_commit_comment_event(payload)
+
+        assert "abc1234" in embed.description
+        assert "carol" in embed.description
+        assert embed.url == "https://github.com/org/repo/commit/abc1234#commitcomment-1"
+
+    def test_commit_comment_embed_has_teal_color_and_footer(self):
+        """Commit comment embeds use dark teal and include GitDiscord footer."""
+        payload = {
+            "action": "edited",
+            "comment": {
+                "commit_id": "def5678abc9012",
+                "body": "Rephrased for clarity",
+                "user": {"login": "dave"},
+            },
+        }
+
+        embed = format_commit_comment_event(payload)
+
+        assert embed.color == discord.Color.dark_teal()
+        assert embed.footer.text == EXPECTED_FOOTER_TEXT

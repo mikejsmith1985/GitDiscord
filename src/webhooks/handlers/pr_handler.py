@@ -1,13 +1,16 @@
 """
-pr_handler.py — Handles GitHub 'pull_request' webhook events for the GitDiscord bot.
+pr_handler.py — Handles pull-request and issue-comment webhook events.
 
-Routes incoming pull_request actions to the correct Discord embed formatter
-and delivers the result to the linked channel via the provided send function.
+Routes supported GitHub event actions to Discord embed formatters and sends
+them to the linked notification channel through the provided send function.
 """
 
 import logging
 
 from src.formatters import (
+    format_commit_comment_event,
+    format_issue_comment_event,
+    format_issue_dict,
     format_pr_opened,
     format_pr_review_requested,
     format_pr_merged,
@@ -21,6 +24,8 @@ logger = logging.getLogger(__name__)
 _ACTION_CLOSED = "closed"
 _ACTION_OPENED = "opened"
 _ACTION_REVIEW_REQUESTED = "review_requested"
+_SUPPORTED_ISSUE_ACTIONS = {"opened", "edited", "closed", "reopened"}
+_SUPPORTED_COMMENT_ACTIONS = {"created", "edited", "deleted"}
 
 
 async def handle_pr_event(payload: dict, send_embed_fn) -> None:
@@ -73,4 +78,63 @@ async def handle_pr_event(payload: dict, send_embed_fn) -> None:
         )
         return
 
+    await send_embed_fn(payload, embed)
+
+
+async def handle_issue_event(payload: dict, send_embed_fn) -> None:
+    """
+    Handle a GitHub 'issues' webhook event.
+
+    Sends lifecycle updates that matter in chat and skips noisy actions.
+    """
+    action = payload.get("action", "")
+    repo_full_name = payload.get("repository", {}).get("full_name", "unknown/repo")
+    if action not in _SUPPORTED_ISSUE_ACTIONS:
+        logger.debug(
+            "Ignoring unsupported issues action %r for %s", action, repo_full_name
+        )
+        return
+
+    issue_dict = payload.get("issue", {})
+    embed = format_issue_dict(issue_dict, action=action)
+    await send_embed_fn(payload, embed)
+
+
+async def handle_issue_comment_event(payload: dict, send_embed_fn) -> None:
+    """
+    Handle a GitHub 'issue_comment' webhook event.
+
+    Sends comment activity so issue discussion is visible in Discord.
+    """
+    action = payload.get("action", "")
+    repo_full_name = payload.get("repository", {}).get("full_name", "unknown/repo")
+    if action not in _SUPPORTED_COMMENT_ACTIONS:
+        logger.debug(
+            "Ignoring unsupported issue_comment action %r for %s",
+            action,
+            repo_full_name,
+        )
+        return
+
+    embed = format_issue_comment_event(payload)
+    await send_embed_fn(payload, embed)
+
+
+async def handle_commit_comment_event(payload: dict, send_embed_fn) -> None:
+    """
+    Handle a GitHub 'commit_comment' webhook event.
+
+    Sends commit discussion activity so review feedback reaches Discord.
+    """
+    action = payload.get("action", "")
+    repo_full_name = payload.get("repository", {}).get("full_name", "unknown/repo")
+    if action not in _SUPPORTED_COMMENT_ACTIONS:
+        logger.debug(
+            "Ignoring unsupported commit_comment action %r for %s",
+            action,
+            repo_full_name,
+        )
+        return
+
+    embed = format_commit_comment_event(payload)
     await send_embed_fn(payload, embed)

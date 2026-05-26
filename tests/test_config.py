@@ -26,6 +26,10 @@ def test_settings_defaults_are_applied(monkeypatch):
     monkeypatch.delenv("WEBHOOK_PORT", raising=False)
     monkeypatch.delenv("DATABASE_PATH", raising=False)
     monkeypatch.delenv("LOG_LEVEL", raising=False)
+    monkeypatch.delenv("ENABLE_MESSAGE_CONTENT_INTENT", raising=False)
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("GITHUB_APP_INSTALLATION_ID", raising=False)
 
     from importlib import reload
     import src.config as config_module

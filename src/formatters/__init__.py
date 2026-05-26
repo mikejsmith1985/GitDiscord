@@ -12,6 +12,8 @@ from .discord_embeds import (
     format_pr_merged,
     format_pr_closed_without_merge,
     format_issue_dict,
+    format_issue_comment_event,
+    format_commit_comment_event,
 )
 
 __all__ = [
@@ -21,4 +23,6 @@ __all__ = [
     "format_pr_merged",
     "format_pr_closed_without_merge",
     "format_issue_dict",
+    "format_issue_comment_event",
+    "format_commit_comment_event",
 ]

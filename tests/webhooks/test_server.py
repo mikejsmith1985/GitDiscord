@@ -316,6 +316,91 @@ def test_webhook_falls_back_to_command_channel_when_no_notification_channel_is_s
     assert notification_channel is None
 
 
+@pytest.mark.parametrize(
+    ("event_name", "payload_dict"),
+    [
+        (
+            "issues",
+            {
+                "action": "opened",
+                "repository": {"full_name": "owner/repo"},
+                "issue": {
+                    "number": 21,
+                    "title": "Issue webhook test",
+                    "state": "open",
+                    "body": "Issue body",
+                    "html_url": "https://github.com/owner/repo/issues/21",
+                    "labels": [],
+                },
+            },
+        ),
+        (
+            "issue_comment",
+            {
+                "action": "created",
+                "repository": {"full_name": "owner/repo"},
+                "issue": {"number": 22, "title": "Issue comment test", "state": "open"},
+                "comment": {
+                    "body": "Comment text",
+                    "html_url": "https://github.com/owner/repo/issues/22#issuecomment-1",
+                    "user": {"login": "alice"},
+                },
+            },
+        ),
+        (
+            "commit_comment",
+            {
+                "action": "created",
+                "repository": {"full_name": "owner/repo"},
+                "comment": {
+                    "body": "Commit comment text",
+                    "html_url": "https://github.com/owner/repo/commit/abc123#commitcomment-1",
+                    "commit_id": "abc1234def5678",
+                    "user": {"login": "bob"},
+                },
+            },
+        ),
+    ],
+)
+def test_webhook_routes_issue_related_events_to_notification_channel(
+    monkeypatch,
+    event_name: str,
+    payload_dict: dict,
+):
+    """Supported issue-related webhook events are delivered to notification channels."""
+    client, command_channel, notification_channel = _build_routing_test_client(
+        monkeypatch,
+        command_link={
+            "guild_id": "1",
+            "channel_id": "111111111111111111",
+            "repo_owner": "owner",
+            "repo_name": "repo",
+        },
+        notification_link={
+            "guild_id": "1",
+            "channel_id": "222222222222222222",
+            "repo_owner": "owner",
+            "repo_name": "repo",
+        },
+    )
+    body = json.dumps(payload_dict).encode()
+
+    response = client.post(
+        "/webhook/github",
+        content=body,
+        headers={
+            GITHUB_SIGNATURE_HEADER: _make_signature(body),
+            GITHUB_EVENT_HEADER: event_name,
+        },
+    )
+
+    assert response.status_code == 200
+    assert notification_channel is not None
+    assert command_channel is not None
+    assert notification_channel.send.await_count == 1
+    assert command_channel.send.await_count == 0
+
+
 # ── Startup safety ─────────────────────────────────────────────────────────────
 
 def test_create_webhook_app_raises_without_secret(monkeypatch):
