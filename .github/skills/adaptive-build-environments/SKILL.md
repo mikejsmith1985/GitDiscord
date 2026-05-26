@@ -1,6 +1,6 @@
 ---
 name: adaptive-build-environments
-description: "Teaches agents to use Forge's namespaced adaptive build tools when builds fail on Windows. Activates on keywords: build, npm, deploy, compile, OpenNext, Turbopack, next build, chunk, Linux, Docker, WSL, ENAMETOOLONG, Windows path, cross-platform."
+description: "Teaches agents to use Forge's namespaced adaptive build tools when builds fail on Windows. Activates on keywords: build, npm, deploy, compile, OpenNext, Turbopack, next build, chunk, Linux, Docker, WSL, ENAMETOOLONG, Windows path, cross-platform, detach, job, recover."
 ---
 
 # Adaptive Build Environments
@@ -45,6 +45,9 @@ the server namespace is `forge-vault`, so these are the names agents can call:
 |------|---------------------------|-------------------|
 | Detect WSL2/Docker availability | `forge-vault-environment_detect` | `environment_detect` |
 | Run a command in auto/WSL/Docker/native | `forge-vault-environment_run` | `environment_run` |
+| Start a background job and get a job ID | `forge-vault-environment_run` (with `detach: true`) | `environment_run` |
+| List all persistent adaptive jobs | `forge-vault-environment_jobs` | `environment_jobs` |
+| Read a job's output and status by ID | `forge-vault-environment_read_job` | `environment_read_job` |
 | List visible Forge terminal tabs | `forge-vault-terminal_sessions` | `terminal_sessions` |
 | Execute in a visible Forge tab | `forge-vault-terminal_execute` | `terminal_execute` |
 | Read a Forge tab scrollback | `forge-vault-terminal_read` | `terminal_read` |
@@ -99,7 +102,9 @@ Forge Terminal ships two MCP tools that let AI agents run Linux-compatible build
 | Tool | What it does |
 |------|-------------|
 | `forge-vault-environment_detect` | Probes the host for WSL2 and Docker. Returns availability + recommended strategy. Call this first, always. |
-| `forge-vault-environment_run` | Runs a shell command in `native`, `linux-wsl`, `linux-docker`, or `auto` environment. Returns `exit_code`, `stdout`, `stderr`, `environment_used`, and `duration_seconds`. |
+| `forge-vault-environment_run` | Runs a shell command in `native`, `linux-wsl`, `linux-docker`, or `auto` environment. Returns `exit_code`, `stdout`, `stderr`, `environment_used`, and `duration_seconds`. Pass `detach: true` to start a background job and get a `job_id` instead. |
+| `forge-vault-environment_jobs` | Lists all persistent adaptive jobs with their statuses (`running`, `succeeded`, `failed`), start time, and log path. Use this to check on a detached job or audit past builds. |
+| `forge-vault-environment_read_job` | Reads a specific job's accumulated log output and final status by `job_id`. Use this to recover output after a detached job completes or to stream progress while it is still running. |
 
 ---
 
@@ -217,6 +222,76 @@ have Windows-style `\` path separators embedded in their names, causing 404s at 
 After a successful build (`exit_code: 0`), check `environment_used` — it must be
 `linux-wsl` or `linux-docker`, **not** `native`. A native build on Windows will
 reproduce the original bug.
+
+---
+
+## Recoverable Jobs — Long-Running or Background Builds
+
+For builds that might exceed a chat turn's timeout, need to run while the agent does
+other work, or must survive an interrupted session, use **detached mode**:
+
+### Step 1 — Start the job in the background
+
+Pass `detach: true` to `forge-vault-environment_run`. It returns immediately with a
+`job_id` and the path where logs are being written.
+
+```json
+{
+  "tool": "forge-vault-environment_run",
+  "arguments": {
+    "command": "npm install && npm run build",
+    "environment": "auto",
+    "cwd": "C:\\ProjectsWin\\my-site\\website",
+    "timeout_seconds": 600,
+    "detach": true
+  }
+}
+```
+
+Example response:
+```json
+{
+  "job_id": "env-20260525-143012-a3f7",
+  "log_path": "C:\\Users\\mikej\\.forge\\adaptive-build-jobs\\env-20260525-143012-a3f7.log",
+  "detached": true,
+  "status": "running",
+  "started_at": "2026-05-25T14:30:12Z"
+}
+```
+
+### Step 2 — List jobs to check status
+
+```json
+{ "tool": "forge-vault-environment_jobs", "arguments": {} }
+```
+
+Returns an array of all tracked jobs — `job_id`, `status` (`running` / `succeeded` / `failed`), `command`, `environment`, `started_at`, and `log_path`.
+
+### Step 3 — Read output by job ID
+
+```json
+{
+  "tool": "forge-vault-environment_read_job",
+  "arguments": { "job_id": "env-20260525-143012-a3f7" }
+}
+```
+
+Returns the job's current `status`, `exit_code` (once finished), `environment_used`, `duration_seconds`, and accumulated `output` from the log file.
+
+### When to use detached mode
+
+| Situation | Use `detach: true`? |
+|-----------|---------------------|
+| Build is expected to take > 5 minutes | ✅ Yes |
+| Agent needs to do other work while the build runs | ✅ Yes |
+| Need to recover output after a session restart | ✅ Yes |
+| Short build (< 2 min) where inline output is preferable | ❌ No — use normal `environment_run` |
+
+### Job persistence
+
+Jobs are written to `~/.forge/adaptive-build-jobs/`. Each job gets a JSON metadata
+file and a `.log` file. Both survive Forge restarts, so you can always recover the
+outcome of any build that was started with `detach: true`.
 
 ---
 

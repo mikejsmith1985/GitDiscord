@@ -162,6 +162,38 @@ class FakeCommandBot:
         yield MagicMock()
 
 
+class _AsyncHistoryIterator:
+    """Simple async iterator for simulating Discord channel history in tests."""
+
+    def __init__(self, items: list[MagicMock]) -> None:
+        self._items = iter(items)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._items)
+        except StopIteration as stop_iteration:
+            raise StopAsyncIteration from stop_iteration
+
+
+def _make_discussion_message(
+    author_name: str,
+    content: str,
+    is_bot: bool = False,
+) -> MagicMock:
+    """Create a lightweight Discord message double for thread collection tests."""
+    message = MagicMock()
+    message.content = content
+    message.attachments = []
+    message.author = MagicMock()
+    message.author.bot = is_bot
+    message.author.display_name = author_name
+    message.author.name = author_name
+    return message
+
+
 @pytest.mark.asyncio
 async def test_get_github_client_returns_error_message_when_authentication_fails():
     """IssueCommands should respond ephemerally when GitHub client creation fails."""
@@ -204,3 +236,59 @@ async def test_link_command_persists_guild_and_channel_ids_as_strings():
     mock_create_channel_link.assert_called_once()
     assert mock_create_channel_link.call_args.kwargs["guild_id"] == "111111111"
     assert mock_create_channel_link.call_args.kwargs["channel_id"] == "222222222"
+
+
+@pytest.mark.asyncio
+async def test_create_issue_from_thread_collects_messages_and_creates_issue():
+    """The thread collector should turn conversation history into a GitHub issue draft."""
+    fake_command_bot = FakeCommandBot()
+    issue_commands = IssueCommands(fake_command_bot)
+    interaction = MagicMock()
+    interaction.channel_id = 333333333
+    interaction.response.send_message = AsyncMock()
+    interaction.channel = MagicMock()
+    interaction.channel.name = "Login bug triage"
+
+    collected_messages = [
+        _make_discussion_message("alice", "The app crashes on startup"),
+        _make_discussion_message("bot", "ignore this", is_bot=True),
+        _make_discussion_message("bob", "I think the database path is wrong"),
+    ]
+    interaction.channel.history.return_value = _AsyncHistoryIterator(collected_messages)
+
+    fake_created_issue = {
+        "number": 42,
+        "title": "The app crashes on startup",
+        "state": "open",
+        "body": "draft body",
+        "url": "https://github.com/owner/repo/issues/42",
+        "created_at": "2024-01-01T00:00:00",
+        "user_login": "alice",
+        "labels": [],
+        "assignees": [],
+    }
+
+    with patch(
+        "src.bot.commands.issue_commands.repository.get_channel_link",
+        return_value=SimpleNamespace(repo_owner="owner", repo_name="repo"),
+    ), patch(
+        "src.bot.commands.issue_commands.GitHubClient",
+    ) as mock_github_client_class:
+        mock_github_client = mock_github_client_class.return_value
+        mock_github_client.create_issue.return_value = fake_created_issue
+
+        await IssueCommands.create_issue_from_thread.callback(issue_commands, interaction)
+
+    mock_github_client_class.assert_called_once()
+    mock_github_client.create_issue.assert_called_once()
+    issue_title = mock_github_client.create_issue.call_args.args[0]
+    issue_body = mock_github_client.create_issue.call_args.args[1]
+
+    assert issue_title == "The app crashes on startup"
+    assert "Captured from Discord thread: **Login bug triage**" in issue_body
+    assert "- **alice**: The app crashes on startup" in issue_body
+    assert "- **bob**: I think the database path is wrong" in issue_body
+    assert "ignore this" not in issue_body
+    interaction.response.send_message.assert_awaited_once()
+    sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
+    assert sent_embed is not None

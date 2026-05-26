@@ -5,7 +5,7 @@
 ## Features
 
 - **GitHub → Discord**: Push commits, PR opened/merged/review-requested posted as rich embeds
-- **Discord → GitHub**: Full issue management via slash commands
+- **Discord → GitHub**: Full issue management via slash commands and thread-based issue drafts
 - **Natural language**: Type `create issue: Fix login bug` or `show issue #5` in designated channels
 - **Multi-repo**: Each Discord channel can link to a different GitHub repo
 - **Railway-ready**: One-click deploy from GitHub, public webhook URL included
@@ -59,6 +59,7 @@
 | `/issue list [open\|closed]` | List issues |
 | `/issue view <number>` | View a specific issue |
 | `/issue create <title> [body]` | Create a new issue |
+| `/issue create-thread` | Create an issue from the current thread discussion |
 | `/issue comment <number> <text>` | Add a comment |
 | `/issue close <number>` | Close an issue |
 

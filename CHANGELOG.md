@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Recoverable adaptive build jobs** (`.github/skills/adaptive-build-environments/SKILL.md`): Documents `detach: true` support in `forge-vault-environment_run`, which starts a background job and returns a `job_id` immediately. New tools `forge-vault-environment_jobs` (list all persistent jobs) and `forge-vault-environment_read_job` (recover output and status by ID) are now described with full usage examples. Jobs persist in `~/.forge/adaptive-build-jobs/` across Forge restarts so builds that exceed a session timeout can always be recovered.
+
+- **Thread-based issue drafts** (`src/bot/commands/issue_commands.py`): `/issue create-thread` collects recent messages from the current thread, preserves authorship and order, and turns the discussion into a GitHub issue draft for review.
+
 ### Fixed
 - **Database path default** (`src/config.py`): Changed default `DATABASE_PATH` from `./gitdiscord.db` to `./data/gitdiscord.db` so the container's `appuser` can write the SQLite file — the container only has write access to `/app/data`, not `/app`
 

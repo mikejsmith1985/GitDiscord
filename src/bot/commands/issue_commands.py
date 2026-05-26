@@ -2,7 +2,8 @@
 issue_commands.py — Discord slash-command cog for GitHub issue management.
 
 Provides the /issue command group, letting users list, view, create, comment
-on, and close GitHub issues directly from a linked Discord channel.
+on, close, and draft issues from Discord thread discussions directly from a
+linked channel.
 """
 
 import logging
@@ -23,10 +24,73 @@ logger = logging.getLogger(__name__)
 # Discord embeds can hold a lot of text, but dumping hundreds of issues into one
 # message becomes unreadable.  Cap the list so it stays a quick-glance summary.
 MAX_ISSUES_DISPLAYED = 10
+MAX_THREAD_MESSAGES_TO_COLLECT = 50
+MAX_DISCUSSION_TITLE_CHARS = 100
+MAX_DISCUSSION_MESSAGE_CHARS = 600
 
 # Shared footer text to keep all bot-generated embeds visually consistent.
 _FOOTER_TEXT = "GitDiscord"
 GITHUB_COMMAND_SETUP_FAILURE_PREFIX = "❌ GitHub command setup failed:"
+
+
+def _normalize_discussion_text(raw_text: str) -> str:
+    """Flatten a Discord message body into a single readable line."""
+    normalized_lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    return " ".join(normalized_lines)
+
+
+def _format_discussion_message(message: discord.Message) -> str:
+    """Render one Discord message as a bullet suitable for a GitHub issue draft."""
+    author_name = getattr(message.author, "display_name", None) or getattr(
+        message.author, "name", "unknown"
+    )
+    normalized_content = _normalize_discussion_text(message.content or "")
+    if len(normalized_content) > MAX_DISCUSSION_MESSAGE_CHARS:
+        normalized_content = normalized_content[: MAX_DISCUSSION_MESSAGE_CHARS - 1] + "…"
+    return f"- **{author_name}**: {normalized_content or '(no text content)'}"
+
+
+def _build_discussion_issue_title(
+    discussion_messages: list[discord.Message],
+    thread_name: str,
+) -> str:
+    """Derive a presentable issue title from the discussion context."""
+    if discussion_messages:
+        first_message_text = _normalize_discussion_text(discussion_messages[0].content)
+        title_candidate = first_message_text or thread_name
+    else:
+        title_candidate = thread_name
+
+    cleaned_title = title_candidate.strip() or "Discord discussion"
+    return cleaned_title[:MAX_DISCUSSION_TITLE_CHARS]
+
+
+def _build_discussion_issue_body(
+    discussion_messages: list[discord.Message],
+    thread_name: str,
+) -> str:
+    """Render the collected thread messages into a GitHub issue body draft."""
+    body_lines = [
+        f"Captured from Discord thread: **{thread_name}**",
+        "",
+        "## Discussion",
+        "",
+    ]
+
+    body_lines.extend(
+        _format_discussion_message(discussion_message)
+        for discussion_message in discussion_messages
+    )
+
+    body_lines.extend(
+        [
+            "",
+            "## Suggested next steps",
+            "- Review the draft title and body before publishing.",
+            "- Add acceptance criteria if the thread did not already include them.",
+        ]
+    )
+    return "\n".join(body_lines)
 
 
 # ── Cog ───────────────────────────────────────────────────────────────────────
@@ -35,11 +99,10 @@ class IssueCommands(commands.Cog):
     """
     Discord cog that registers the /issue slash-command group.
 
-    Each subcommand maps to a GitHubClient method so that Discord users
-    can interact with a linked repository's issues without leaving Discord.
-    The cog resolves the correct GitHubClient from the channel → repo link
-    stored in the database on every command invocation, so PAT rotation or
-    repo changes are always picked up immediately.
+    Each subcommand maps to a GitHubClient method so that Discord users can
+    interact with a linked repository's issues without leaving Discord.  The
+    thread-draft command collects recent discussion messages first so users can
+    turn a conversation into an issue without manual copy/paste.
     """
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -133,6 +196,24 @@ class IssueCommands(commands.Cog):
                 ephemeral=True,
             )
             return None
+
+    async def _collect_discussion_messages(self, channel_history_source) -> list[discord.Message]:
+        """Collect recent Discord messages from a thread or text channel."""
+        discussion_messages: list[discord.Message] = []
+        async for history_message in channel_history_source.history(
+            limit=MAX_THREAD_MESSAGES_TO_COLLECT,
+            oldest_first=True,
+        ):
+            if history_message.author.bot:
+                continue
+
+            normalized_content = _normalize_discussion_text(history_message.content or "")
+            if not normalized_content and not history_message.attachments:
+                continue
+
+            discussion_messages.append(history_message)
+
+        return discussion_messages
 
     # ── /issue list ───────────────────────────────────────────────────────────
 
@@ -307,6 +388,65 @@ class IssueCommands(commands.Cog):
 
         embed = format_issue_dict(created_issue, action="created")
         await interaction.response.send_message(embed=embed)
+
+    # ── /issue create-thread ───────────────────────────────────────────────────
+
+    @issue_group.command(
+        name="create-thread",
+        description="Create a GitHub issue from the current thread discussion.",
+    )
+    async def create_issue_from_thread(self, interaction: discord.Interaction) -> None:
+        """
+        Collect recent thread messages and turn them into a GitHub issue draft.
+
+        This command is intentionally thread-centric so users can group the
+        discussion they want to turn into an issue without copy/pasting every
+        message into a slash-command body.
+        """
+        github_client = await self._get_github_client(interaction)
+        if github_client is None:
+            return
+
+        discussion_source = interaction.channel
+        if discussion_source is None or not hasattr(discussion_source, "history"):
+            await interaction.response.send_message(
+                "Run this command inside a thread or channel with message history.",
+                ephemeral=True,
+            )
+            return
+
+        discussion_messages = await self._collect_discussion_messages(discussion_source)
+        if not discussion_messages:
+            await interaction.response.send_message(
+                "No non-bot messages were found to turn into an issue.",
+                ephemeral=True,
+            )
+            return
+
+        thread_name = getattr(discussion_source, "name", "Discord discussion")
+        issue_title = _build_discussion_issue_title(discussion_messages, thread_name)
+        issue_body = _build_discussion_issue_body(discussion_messages, thread_name)
+
+        try:
+            created_issue = github_client.create_issue(issue_title, issue_body)
+        except ValueError as validation_error:
+            await interaction.response.send_message(
+                f"❌ Invalid request: {validation_error}",
+                ephemeral=True,
+            )
+            return
+        except Exception as unexpected_error:
+            await interaction.response.send_message(
+                f"❌ GitHub API error: {unexpected_error}",
+                ephemeral=True,
+            )
+            return
+
+        confirmation_embed = format_issue_dict(created_issue, action="created")
+        confirmation_embed.set_footer(
+            text=f"Drafted from {len(discussion_messages)} thread message(s)"
+        )
+        await interaction.response.send_message(embed=confirmation_embed)
 
     # ── /issue comment ────────────────────────────────────────────────────────
 
