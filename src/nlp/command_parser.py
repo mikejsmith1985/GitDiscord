@@ -102,6 +102,17 @@ PATTERN_CLOSE_ISSUE = re.compile(
     re.IGNORECASE,
 )
 
+# Matches issue references embedded inside normal conversation text.
+# Examples:
+#   - "gh issue #123"
+#   - "github issue 123"
+#   - "please reference issue #123 in this thread"
+PATTERN_INLINE_ISSUE_REFERENCE = re.compile(
+    r"(?:\b(?:gh|github)\s+issue\s+#?(?P<issue_num_prefixed>\d+)\b)"
+    r"|(?:\bissue\s+#(?P<issue_num_plain>\d+)\b)",
+    re.IGNORECASE,
+)
+
 
 # ── Data model ────────────────────────────────────────────────────────────────
 
@@ -208,6 +219,18 @@ def parse_command(text: str) -> ParsedCommand:
         return ParsedCommand(
             action=ACTION_CLOSE,
             issue_number=int(close_match.group("issue_num")),
+        )
+
+    # ── Inline issue reference inside free text ──────────────────────────────
+    inline_issue_reference_match = PATTERN_INLINE_ISSUE_REFERENCE.search(stripped_text)
+    if inline_issue_reference_match:
+        raw_issue_number = (
+            inline_issue_reference_match.group("issue_num_prefixed")
+            or inline_issue_reference_match.group("issue_num_plain")
+        )
+        return ParsedCommand(
+            action=ACTION_VIEW,
+            issue_number=int(raw_issue_number),
         )
 
     # ── No pattern matched ────────────────────────────────────────────────────

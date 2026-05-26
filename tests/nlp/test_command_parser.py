@@ -129,6 +129,18 @@ class TestViewAction:
         assert result.action == ACTION_VIEW
         assert result.issue_number == 5
 
+    def test_inline_gh_issue_reference_in_sentence(self):
+        """Free text containing 'gh issue #N' should resolve to ACTION_VIEW."""
+        result = parse_command("Hey Daniel please reference gh issue #123 when you triage this.")
+        assert result.action == ACTION_VIEW
+        assert result.issue_number == 123
+
+    def test_inline_issue_reference_in_sentence(self):
+        """Free text containing 'issue #N' should resolve to ACTION_VIEW."""
+        result = parse_command("Please reference issue #88 in the follow-up notes.")
+        assert result.action == ACTION_VIEW
+        assert result.issue_number == 88
+
 
 # ── CREATE action ──────────────────────────────────────────────────────────────
 

@@ -78,6 +78,7 @@ privileged intent enabled for the bot in the Discord Developer Portal.
 |----------|--------|
 | `list issues` | List open issues |
 | `show issue #5` | View issue #5 |
+| `please reference gh issue #123` | Auto-resolve and post issue #123 as a clickable embed |
 | `create issue: Fix login bug` | Create a new issue |
 | `comment on issue #5: looks good` | Add a comment |
 | `close issue #5` | Close issue #5 |

@@ -13,6 +13,7 @@ from src.bot.commands.issue_commands import (
     IssueCommands,
 )
 from src.bot.commands.link_commands import LinkCommands
+from src.nlp.command_parser import NlpMessageHandler
 
 
 def test_gitdiscord_bot_disables_message_content_intent_by_default():
@@ -345,3 +346,57 @@ async def test_create_issue_from_thread_collects_messages_and_creates_issue():
     interaction.response.send_message.assert_awaited_once()
     sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
     assert sent_embed is not None
+
+
+@pytest.mark.asyncio
+async def test_nlp_handler_resolves_inline_issue_reference_and_replies_with_embed():
+    """Inline 'gh issue #N' references should fetch and reply with a clickable issue embed."""
+    fake_db_session = MagicMock()
+    fake_db_session_factory = MagicMock(return_value=fake_db_session)
+    nlp_handler = NlpMessageHandler(
+        db_session_factory=fake_db_session_factory,
+        discord_bot=MagicMock(),
+    )
+
+    message = MagicMock()
+    message.author.bot = False
+    message.channel.id = 444444444
+    message.content = "Hey team, please reference gh issue #123 in this thread."
+    message.reply = AsyncMock()
+    message.add_reaction = AsyncMock()
+
+    issue_lookup_result = {
+        "number": 123,
+        "title": "Fix startup crash",
+        "state": "open",
+        "body": "Details",
+        "url": "https://github.com/owner/repo/issues/123",
+        "created_at": "2024-01-01T00:00:00",
+        "user_login": "alice",
+        "labels": [],
+        "assignees": [],
+    }
+
+    with patch(
+        "src.nlp.command_parser.repository.is_nlp_channel",
+        return_value=True,
+    ), patch(
+        "src.nlp.command_parser.repository.get_channel_link",
+        return_value=SimpleNamespace(
+            github_pat="GITHUB_APP_AUTH",
+            repo_owner="owner",
+            repo_name="repo",
+        ),
+    ), patch(
+        "src.nlp.command_parser.GitHubClient",
+    ) as mock_github_client_class:
+        mock_github_client = mock_github_client_class.return_value
+        mock_github_client.get_issue.return_value = issue_lookup_result
+
+        await nlp_handler.handle_message(message)
+
+    mock_github_client.get_issue.assert_called_once_with(123)
+    message.reply.assert_awaited_once()
+    reply_embed = message.reply.await_args.kwargs["embed"]
+    assert reply_embed is not None
+    assert reply_embed.url == "https://github.com/owner/repo/issues/123"
