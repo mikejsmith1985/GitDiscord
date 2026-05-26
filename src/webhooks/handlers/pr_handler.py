@@ -89,6 +89,9 @@ async def handle_issue_event(payload: dict, send_embed_fn) -> None:
     """
     action = payload.get("action", "")
     repo_full_name = payload.get("repository", {}).get("full_name", "unknown/repo")
+    logger.info(
+        "Handling issues event: action=%r repository=%s", action, repo_full_name
+    )
     if action not in _SUPPORTED_ISSUE_ACTIONS:
         logger.debug(
             "Ignoring unsupported issues action %r for %s", action, repo_full_name
@@ -96,8 +99,20 @@ async def handle_issue_event(payload: dict, send_embed_fn) -> None:
         return
 
     issue_dict = payload.get("issue", {})
+    issue_number = issue_dict.get("number", "unknown")
+    logger.info(
+        "Processing issue #%s action=%r repository=%s",
+        issue_number,
+        action,
+        repo_full_name,
+    )
     embed = format_issue_dict(issue_dict, action=action)
     await send_embed_fn(payload, embed)
+    logger.info(
+        "Successfully sent embed for issue #%s (%s) to Discord",
+        issue_number,
+        repo_full_name,
+    )
 
 
 async def handle_issue_comment_event(payload: dict, send_embed_fn) -> None:

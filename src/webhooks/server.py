@@ -132,6 +132,37 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
         """
         return {"status": "ok", "service": "gitdiscord"}
 
+    # ── Diagnostic endpoint ────────────────────────────────────────────────────
+
+    @app.get("/debug/channels/{channel_id}")
+    async def debug_channel(channel_id: str):
+       """
+       Debug endpoint to check if bot can see and message a Discord channel.
+
+       Helps diagnose why webhook notifications are not being sent.
+       """
+       try:
+           channel = discord_bot.get_channel(int(channel_id))
+           if channel is None:
+               return {
+                   "status": "error",
+                   "channel_id": channel_id,
+                   "issue": "Bot cannot see this channel. It may not be a member or the channel ID is invalid.",
+               }
+           return {
+               "status": "ok",
+               "channel_id": channel_id,
+               "channel_name": channel.name,
+               "guild_id": str(channel.guild.id) if channel.guild else None,
+               "can_send": channel.permissions_for(channel.guild.me).send_messages if channel.guild else None,
+           }
+       except Exception as error:
+           return {
+               "status": "error",
+               "channel_id": channel_id,
+               "error": str(error),
+           }
+
     # ── Channel send helper ─────────────────────────────────────────────────────
 
     async def _channel_send_fn(payload: dict, embed) -> None:
@@ -159,6 +190,9 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
         # The DB stores owner and name in separate columns, so we split the
         # full_name string to query them individually.
         repo_owner, repo_name = repo_full_name.split("/", maxsplit=1)
+        logger.debug(
+            "Looking up channel link for %s/%s", repo_owner, repo_name
+        )
 
         with db_session_factory() as session:
             notification_channel_link = repository.get_notification_channel_link(
@@ -168,7 +202,13 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
             )
             if notification_channel_link is not None:
                 channel_id = notification_channel_link.channel_id
+                logger.info(
+                    "Found notification channel link: %s → %s", repo_full_name, channel_id
+                )
             else:
+                logger.debug(
+                    "No notification channel link found; checking legacy channel_repo_links"
+                )
                 channel_link = repository.get_channel_link_for_repo(
                     session,
                     repo_owner,
@@ -181,6 +221,9 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
                     )
                     return
                 channel_id = channel_link.channel_id
+                logger.info(
+                    "Found legacy channel link: %s → %s", repo_full_name, channel_id
+                )
 
         discord_channel = discord_bot.get_channel(int(channel_id))
         if discord_channel is None:
@@ -193,8 +236,8 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
             return
 
         await discord_channel.send(embed=embed)
-        logger.debug(
-            "Sent embed to channel_id=%s for repository %s",
+        logger.info(
+            "✓ Sent embed to channel_id=%s for repository %s",
             channel_id,
             repo_full_name,
         )
@@ -231,7 +274,7 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
             )
 
         event_type = request.headers.get(GITHUB_EVENT_HEADER, "unknown")
-        logger.info("Received GitHub webhook event: %s", event_type)
+        logger.info("━━ Received GitHub webhook event: %s ━━", event_type.upper())
 
         payload: dict = await request.json()
 
