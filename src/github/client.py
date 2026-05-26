@@ -53,6 +53,28 @@ def _comment_to_dict(comment) -> dict:
     }
 
 
+def _pull_request_to_dict(pull_request) -> dict:
+    """Convert a PyGithub PullRequest object into a plain dict."""
+    return {
+        "number": pull_request.number,
+        "title": pull_request.title,
+        "state": pull_request.state,
+        "body": pull_request.body or "",
+        "url": pull_request.html_url,
+        "created_at": pull_request.created_at.isoformat(),
+        "user_login": pull_request.user.login,
+        "base_ref": pull_request.base.ref,
+        "head_ref": pull_request.head.ref,
+        "merged": pull_request.merged,
+        "merged_by_login": (
+            pull_request.merged_by.login if pull_request.merged_by else None
+        ),
+        "labels": [label.name for label in pull_request.labels],
+        "assignees": [assignee.login for assignee in pull_request.assignees],
+        "draft": pull_request.draft,
+    }
+
+
 class GitHubClient:
     """
     High-level GitHub API client used by the GitDiscord bot.
@@ -174,6 +196,24 @@ class GitHubClient:
         except UnknownObjectException:
             # The issue does not exist — return None rather than raising so
             # callers can decide how to handle the "not found" case gracefully.
+            return None
+
+    # ── Pull request queries ───────────────────────────────────────────────
+
+    def get_pull_request(self, pull_request_number: int) -> dict | None:
+        """
+        Return a single pull request by number, or None if it does not exist.
+
+        Args:
+            pull_request_number: The GitHub PR number shown in the pull request URL.
+
+        Returns:
+            A pull request dict, or None when the PR number is not found.
+        """
+        try:
+            pull_request = self._repo.get_pull(pull_request_number)
+            return _pull_request_to_dict(pull_request)
+        except UnknownObjectException:
             return None
 
     # ── Issue mutations ────────────────────────────────────────────────────
