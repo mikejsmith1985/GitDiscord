@@ -6,6 +6,7 @@
 
 - **GitHub → Discord**: Push commits, PR opened/merged/review-requested posted as rich embeds
 - **Discord → GitHub**: Full issue management via slash commands and thread-based issue drafts
+- **Split channel routing**: Keep issue commands in one channel and send webhook notifications to another
 - **Natural language**: Type `create issue: Fix login bug` or `show issue #5` in designated channels
 - **Multi-repo**: Each Discord channel can link to a different GitHub repo
 - **Railway-ready**: One-click deploy from GitHub, public webhook URL included
@@ -53,7 +54,10 @@
 |---------|-------------|
 | `/link <repo>` | Link this channel to a GitHub repo (`owner/repo`) using configured GitHub App auth |
 | `/unlink` | Remove this channel's repo link |
-| `/status` | Show the linked repo for this channel |
+| `/status` | Show issue-command and notification routing for this channel |
+| `/notifications link <repo>` | Send GitHub webhook notifications for a repo to this channel |
+| `/notifications unlink <repo>` | Stop sending a repo's GitHub notifications to this channel |
+| `/notifications status` | Show which repos currently notify this channel |
 | `/nlp-enable` | Enable natural language commands in this channel |
 | `/nlp-disable` | Disable natural language commands |
 | `/issue list [open\|closed]` | List issues |

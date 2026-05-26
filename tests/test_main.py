@@ -239,6 +239,59 @@ async def test_link_command_persists_guild_and_channel_ids_as_strings():
 
 
 @pytest.mark.asyncio
+async def test_notification_link_command_persists_guild_and_channel_ids_as_strings():
+    """Notifications links should persist Discord IDs as strings for stable lookups."""
+    fake_command_bot = FakeCommandBot()
+    link_commands = LinkCommands(fake_command_bot)
+    interaction = MagicMock()
+    interaction.guild_id = 111111111
+    interaction.channel_id = 222222222
+    interaction.response.send_message = AsyncMock()
+
+    with patch(
+        "src.bot.commands.link_commands.create_notification_channel_link"
+    ) as mock_create_notification_channel_link:
+        await LinkCommands.link_notifications.callback(link_commands, interaction, "owner/repo")
+
+    mock_create_notification_channel_link.assert_called_once()
+    assert mock_create_notification_channel_link.call_args.kwargs["guild_id"] == "111111111"
+    assert mock_create_notification_channel_link.call_args.kwargs["channel_id"] == "222222222"
+
+
+@pytest.mark.asyncio
+async def test_status_reports_command_and_notification_channels():
+    """Status should show both command and notification routing when configured."""
+    fake_command_bot = FakeCommandBot()
+    link_commands = LinkCommands(fake_command_bot)
+    interaction = MagicMock()
+    interaction.channel_id = 333333333
+    interaction.response.send_message = AsyncMock()
+
+    notification_link = SimpleNamespace(repo_owner="owner", repo_name="repo")
+    additional_notification_link = SimpleNamespace(repo_owner="other", repo_name="repo-two")
+
+    with patch(
+        "src.bot.commands.link_commands.get_channel_link",
+        return_value=SimpleNamespace(repo_owner="owner", repo_name="repo"),
+    ), patch(
+        "src.bot.commands.link_commands.list_notification_links_for_channel",
+        return_value=[notification_link, additional_notification_link],
+    ), patch(
+        "src.bot.commands.link_commands.is_nlp_channel",
+        return_value=True,
+    ):
+        await LinkCommands.status.callback(link_commands, interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
+    assert "Issue Commands" in sent_embed.description
+    assert "GitHub Notifications" in sent_embed.description
+    assert "`owner/repo`" in sent_embed.description
+    assert "`other/repo-two`" in sent_embed.description
+    assert "NLP Command Parsing" in sent_embed.description
+
+
+@pytest.mark.asyncio
 async def test_create_issue_from_thread_collects_messages_and_creates_issue():
     """The thread collector should turn conversation history into a GitHub issue draft."""
     fake_command_bot = FakeCommandBot()

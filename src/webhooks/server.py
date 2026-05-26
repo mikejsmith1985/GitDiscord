@@ -20,10 +20,9 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, Request, Response
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import ChannelRepoLink
+from src.db import repository
 from src.webhooks.handlers.push_handler import handle_push_event
 from src.webhooks.handlers.pr_handler import handle_pr_event
 
@@ -156,25 +155,33 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
         repo_owner, repo_name = repo_full_name.split("/", maxsplit=1)
 
         with db_session_factory() as session:
-            query = select(ChannelRepoLink).where(
-                ChannelRepoLink.repo_owner == repo_owner,
-                ChannelRepoLink.repo_name == repo_name,
+            notification_channel_link = repository.get_notification_channel_link(
+                session,
+                repo_owner,
+                repo_name,
             )
-            channel_link: ChannelRepoLink | None = session.scalars(query).first()
+            if notification_channel_link is not None:
+                channel_id = notification_channel_link.channel_id
+            else:
+                channel_link = repository.get_channel_link_for_repo(
+                    session,
+                    repo_owner,
+                    repo_name,
+                )
+                if channel_link is None:
+                    logger.warning(
+                        "No Discord channel linked to repository %s — embed not sent.",
+                        repo_full_name,
+                    )
+                    return
+                channel_id = channel_link.channel_id
 
-        if channel_link is None:
-            logger.warning(
-                "No Discord channel linked to repository %s — embed not sent.",
-                repo_full_name,
-            )
-            return
-
-        discord_channel = discord_bot.get_channel(int(channel_link.channel_id))
+        discord_channel = discord_bot.get_channel(int(channel_id))
         if discord_channel is None:
             logger.warning(
                 "discord_bot.get_channel returned None for channel_id=%s (repo=%s). "
                 "The bot may not be a member of that channel.",
-                channel_link.channel_id,
+                channel_id,
                 repo_full_name,
             )
             return
@@ -182,7 +189,7 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
         await discord_channel.send(embed=embed)
         logger.debug(
             "Sent embed to channel_id=%s for repository %s",
-            channel_link.channel_id,
+            channel_id,
             repo_full_name,
         )
 

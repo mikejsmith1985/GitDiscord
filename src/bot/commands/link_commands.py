@@ -1,8 +1,8 @@
 """
 Slash commands cog for linking Discord channels to GitHub repositories.
 
-Provides /link, /unlink, /status, /nlp-enable, and /nlp-disable commands
-that allow server admins to configure per-channel GitHub integrations.
+Provides command-channel links, notification-channel links, and NLP toggles so
+server admins can separate issue commands from webhook notifications.
 """
 
 import re
@@ -13,10 +13,13 @@ from discord.ext import commands
 
 from src.db.repository import (
     create_channel_link,
+    create_notification_channel_link,
     delete_channel_link,
+    delete_notification_channel_link,
     disable_nlp_channel,
     enable_nlp_channel,
     get_channel_link,
+    list_notification_links_for_channel,
     is_nlp_channel,
 )
 
@@ -29,6 +32,10 @@ VALID_REPO_FORMAT = r"^[^/]+/[^/]+$"
 EMBED_COLOR_SUCCESS = discord.Color.green()
 EMBED_COLOR_ERROR = discord.Color.red()
 EMBED_COLOR_INFO = discord.Color.blue()
+
+# Status output should stay readable even if a channel receives notifications
+# for several repositories.
+MAX_NOTIFICATION_REPOS_DISPLAYED = 5
 
 
 # ── Helper builders ────────────────────────────────────────────────────────────
@@ -59,11 +66,29 @@ def _is_valid_repo_slug(repo: str) -> bool:
     return bool(re.match(VALID_REPO_FORMAT, repo))
 
 
+def _format_notification_repo_summary(notification_links: list) -> str:
+    """Render notification subscriptions into a short, readable status summary."""
+    if not notification_links:
+        return "No GitHub notifications are configured here."
+
+    displayed_links = notification_links[:MAX_NOTIFICATION_REPOS_DISPLAYED]
+    rendered_lines = [
+        f"• `{notification_link.repo_owner}/{notification_link.repo_name}`"
+        for notification_link in displayed_links
+    ]
+
+    remaining_link_count = len(notification_links) - MAX_NOTIFICATION_REPOS_DISPLAYED
+    if remaining_link_count > 0:
+        rendered_lines.append(f"• … and {remaining_link_count} more")
+
+    return "\n".join(rendered_lines)
+
+
 # ── Cog ───────────────────────────────────────────────────────────────────────
 
 class LinkCommands(commands.Cog):
     """
-    Discord slash commands for managing channel ↔ GitHub repo links.
+    Discord slash commands for managing command and notification channel routing.
 
     All responses are ephemeral so credentials and configuration details
     remain private to the user who invoked the command.
@@ -124,17 +149,18 @@ class LinkCommands(commands.Cog):
         success_embed = _build_success_embed(
             "✅ Channel Linked",
             f"This channel is now linked to **{repo}**.\n\n"
-            "GitHub events for that repository will be posted here, and you can "
-            "interact with issues and PRs directly from this channel.",
+            "You can now run issue commands in this channel. Use "
+            "`/notifications link <repo>` in a dedicated feed channel if you "
+            "want webhook notifications somewhere else.",
         )
         await interaction.response.send_message(embed=success_embed, ephemeral=True)
 
     # ── /unlink ────────────────────────────────────────────────────────────────
 
-    @app_commands.command(name="unlink", description="Remove the GitHub repo link from this channel.")
+    @app_commands.command(name="unlink", description="Remove this channel's issue-command repo link.")
     async def unlink(self, interaction: discord.Interaction) -> None:
         """
-        Delete the channel→repo link so no further GitHub activity is posted here.
+        Delete the command-channel repo link for this channel.
 
         Returns a clear message when no link exists, so users aren't left
         wondering whether the command succeeded.
@@ -155,20 +181,24 @@ class LinkCommands(commands.Cog):
 
         success_embed = _build_success_embed(
             "✅ Channel Unlinked",
-            "The GitHub repository link for this channel has been removed. "
-            "GitHub events will no longer be posted here.",
+            "Issue-command routing for this channel has been removed. "
+            "Notification routing is managed separately with `/notifications`.",
         )
         await interaction.response.send_message(embed=success_embed, ephemeral=True)
 
     # ── /status ────────────────────────────────────────────────────────────────
 
-    @app_commands.command(name="status", description="Show the GitHub repo currently linked to this channel.")
+    @app_commands.command(name="status", description="Show command and notification routing for this channel.")
     async def status(self, interaction: discord.Interaction) -> None:
         """
-        Display the linked repository for this channel and NLP mode status.
+        Display the command-channel link, notification subscriptions, and NLP mode status.
         """
         with self.bot.get_db_session() as session:
             channel_link = get_channel_link(
+                session=session,
+                channel_id=str(interaction.channel_id),
+            )
+            notification_links = list_notification_links_for_channel(
                 session=session,
                 channel_id=str(interaction.channel_id),
             )
@@ -177,22 +207,145 @@ class LinkCommands(commands.Cog):
                 channel_id=str(interaction.channel_id),
             )
 
-        if channel_link is None:
+        nlp_status_label = "✅ Enabled" if hasNlpEnabled else "❌ Disabled"
+        command_section = (
+            f"**Issue Commands:** `{channel_link.repo_owner}/{channel_link.repo_name}`"
+            if channel_link is not None
+            else "**Issue Commands:** not configured here"
+        )
+        notification_section = (
+            "**GitHub Notifications:**\n"
+            f"{_format_notification_repo_summary(notification_links)}"
+        )
+
+        status_embed = _build_info_embed(
+            "📋 Channel Status",
+            f"{command_section}\n\n"
+            f"{notification_section}\n\n"
+            f"**NLP Command Parsing:** {nlp_status_label}",
+        )
+        await interaction.response.send_message(embed=status_embed, ephemeral=True)
+
+    # ── /notifications ───────────────────────────────────────────────────────
+
+    notification_group = app_commands.Group(
+        name="notifications",
+        description="Manage which channel receives GitHub webhook notifications.",
+    )
+
+    @notification_group.command(
+        name="link",
+        description="Send GitHub notifications for a repository to this channel.",
+    )
+    @app_commands.describe(
+        repo="GitHub repository in owner/repo format (e.g. mikejsmith1985/GitDiscord)",
+    )
+    async def link_notifications(
+        self,
+        interaction: discord.Interaction,
+        repo: str,
+    ) -> None:
+        """
+        Register the current channel as the notification destination for a repo.
+
+        This does not change the channel that runs issue commands. Users can keep
+        their command channel in one place and move notifications to a dedicated
+        feed channel.
+        """
+        isRepoFormatValid = _is_valid_repo_slug(repo)
+        if not isRepoFormatValid:
+            error_embed = _build_error_embed(
+                "❌ Invalid Repository Format",
+                f"`{repo}` is not valid. Please use **owner/repo** format, "
+                "e.g. `mikejsmith1985/GitDiscord`.",
+            )
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            return
+
+        repo_owner, repo_name = repo.split("/", maxsplit=1)
+
+        with self.bot.get_db_session() as session:
+            create_notification_channel_link(
+                session=session,
+                guild_id=str(interaction.guild_id),
+                channel_id=str(interaction.channel_id),
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+            )
+
+        success_embed = _build_success_embed(
+            "✅ Notification Channel Linked",
+            f"GitHub notifications for **{repo}** will now be posted in this channel.\n\n"
+            "Use `/link` in your command channel if you want issue commands to stay elsewhere.",
+        )
+        await interaction.response.send_message(embed=success_embed, ephemeral=True)
+
+    @notification_group.command(
+        name="unlink",
+        description="Stop sending GitHub notifications for a repository to this channel.",
+    )
+    @app_commands.describe(
+        repo="GitHub repository in owner/repo format (e.g. mikejsmith1985/GitDiscord)",
+    )
+    async def unlink_notifications(
+        self,
+        interaction: discord.Interaction,
+        repo: str,
+    ) -> None:
+        """
+        Remove a repository from this channel's notification feed.
+
+        The command is intentionally repo-scoped so one channel can still receive
+        notifications for several repositories without losing them all at once.
+        """
+        isRepoFormatValid = _is_valid_repo_slug(repo)
+        if not isRepoFormatValid:
+            error_embed = _build_error_embed(
+                "❌ Invalid Repository Format",
+                f"`{repo}` is not valid. Please use **owner/repo** format, "
+                "e.g. `mikejsmith1985/GitDiscord`.",
+            )
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            return
+
+        repo_owner, repo_name = repo.split("/", maxsplit=1)
+
+        with self.bot.get_db_session() as session:
+            wasLinkRemoved = delete_notification_channel_link(
+                session=session,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+            )
+
+        if not wasLinkRemoved:
             info_embed = _build_info_embed(
-                "ℹ️ No Repository Linked",
-                "No repo is linked to this channel.\n\n"
-                "Use `/link owner/repo` to connect a GitHub repository.",
+                "ℹ️ No Notification Link",
+                f"No GitHub notifications are linked for **{repo}**.",
             )
             await interaction.response.send_message(embed=info_embed, ephemeral=True)
             return
 
-        linked_repo = f"{channel_link.repo_owner}/{channel_link.repo_name}"
-        nlp_status_label = "✅ Enabled" if hasNlpEnabled else "❌ Disabled"
+        success_embed = _build_success_embed(
+            "✅ Notification Link Removed",
+            f"GitHub notifications for **{repo}** will no longer be posted in this channel.",
+        )
+        await interaction.response.send_message(embed=success_embed, ephemeral=True)
+
+    @notification_group.command(
+        name="status",
+        description="Show which repositories send GitHub notifications to this channel.",
+    )
+    async def notification_status(self, interaction: discord.Interaction) -> None:
+        """Show the repositories that currently send GitHub notifications to this channel."""
+        with self.bot.get_db_session() as session:
+            notification_links = list_notification_links_for_channel(
+                session=session,
+                channel_id=str(interaction.channel_id),
+            )
 
         status_embed = _build_info_embed(
-            "📋 Channel Status",
-            f"**Linked Repository:** `{linked_repo}`\n"
-            f"**NLP Command Parsing:** {nlp_status_label}",
+            "📣 Notification Channel Status",
+            _format_notification_repo_summary(notification_links),
         )
         await interaction.response.send_message(embed=status_embed, ephemeral=True)
 

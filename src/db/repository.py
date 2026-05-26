@@ -10,7 +10,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from src.db.models import ChannelRepoLink, NlpChannel
+from src.db.models import ChannelRepoLink, NlpChannel, NotificationChannelLink
 
 
 # ── ChannelRepoLink operations ────────────────────────────────────────────────
@@ -73,6 +73,43 @@ def create_channel_link(
     return get_channel_link(session, channel_id)
 
 
+def create_notification_channel_link(
+    session: Session,
+    guild_id: str,
+    channel_id: str,
+    repo_owner: str,
+    repo_name: str,
+) -> NotificationChannelLink:
+    """
+    Create or update the notification channel for a GitHub repository.
+
+    The repository itself remains the source of truth, so re-running the command
+    in a different channel simply moves the notifications there.
+    """
+    upsert_statement = (
+        sqlite_insert(NotificationChannelLink)
+        .values(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+        )
+        .on_conflict_do_update(
+            index_elements=[
+                NotificationChannelLink.repo_owner,
+                NotificationChannelLink.repo_name,
+            ],
+            set_={
+                "guild_id": guild_id,
+                "channel_id": channel_id,
+            },
+        )
+    )
+    session.execute(upsert_statement)
+    session.flush()
+    return get_notification_channel_link(session, repo_owner, repo_name)
+
+
 def get_channel_link(session: Session, channel_id: str) -> ChannelRepoLink | None:
     """
     Retrieve the repository link for a specific Discord channel.
@@ -85,6 +122,19 @@ def get_channel_link(session: Session, channel_id: str) -> ChannelRepoLink | Non
         The ChannelRepoLink for this channel, or None if no link exists.
     """
     query = select(ChannelRepoLink).where(ChannelRepoLink.channel_id == channel_id)
+    return session.scalars(query).first()
+
+
+def get_channel_link_for_repo(
+    session: Session,
+    repo_owner: str,
+    repo_name: str,
+) -> ChannelRepoLink | None:
+    """Return the command-channel link for a specific GitHub repository."""
+    query = select(ChannelRepoLink).where(
+        ChannelRepoLink.repo_owner == repo_owner,
+        ChannelRepoLink.repo_name == repo_name,
+    )
     return session.scalars(query).first()
 
 
@@ -106,6 +156,44 @@ def delete_channel_link(session: Session, channel_id: str) -> bool:
     # rowcount reflects how many rows were actually removed by the statement.
     was_deleted = result.rowcount > 0
     return was_deleted
+
+
+def get_notification_channel_link(
+    session: Session,
+    repo_owner: str,
+    repo_name: str,
+) -> NotificationChannelLink | None:
+    """Return the notification-channel link for a specific GitHub repository."""
+    query = select(NotificationChannelLink).where(
+        NotificationChannelLink.repo_owner == repo_owner,
+        NotificationChannelLink.repo_name == repo_name,
+    )
+    return session.scalars(query).first()
+
+
+def delete_notification_channel_link(
+    session: Session,
+    repo_owner: str,
+    repo_name: str,
+) -> bool:
+    """Remove the notification-channel link for a GitHub repository."""
+    delete_statement = delete(NotificationChannelLink).where(
+        NotificationChannelLink.repo_owner == repo_owner,
+        NotificationChannelLink.repo_name == repo_name,
+    )
+    result = session.execute(delete_statement)
+    return result.rowcount > 0
+
+
+def list_notification_links_for_channel(
+    session: Session,
+    channel_id: str,
+) -> list[NotificationChannelLink]:
+    """Return all repositories that currently deliver notifications to a channel."""
+    query = select(NotificationChannelLink).where(
+        NotificationChannelLink.channel_id == channel_id,
+    )
+    return list(session.scalars(query).all())
 
 
 def list_guild_links(session: Session, guild_id: str) -> list[ChannelRepoLink]:

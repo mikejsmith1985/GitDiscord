@@ -9,12 +9,23 @@ and row-count returns for delete operations.
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from src.db.models import ChannelRepoLink, NlpChannel, get_engine, create_all_tables
+from src.db.models import (
+    ChannelRepoLink,
+    NlpChannel,
+    NotificationChannelLink,
+    create_all_tables,
+    get_engine,
+)
 from src.db.repository import (
     create_channel_link,
+    create_notification_channel_link,
     get_channel_link,
+    get_channel_link_for_repo,
+    get_notification_channel_link,
     delete_channel_link,
+    delete_notification_channel_link,
     list_guild_links,
+    list_notification_links_for_channel,
     enable_nlp_channel,
     is_nlp_channel,
     disable_nlp_channel,
@@ -236,6 +247,160 @@ class TestListGuildLinks:
         result = list_guild_links(db_session, "guild-with-no-links")
 
         assert result == []
+
+
+# ── create_notification_channel_link ───────────────────────────────────────────
+
+
+class TestCreateNotificationChannelLink:
+    """Tests for the create_notification_channel_link() repository function."""
+
+    def test_create_notification_channel_link_inserts_new_record(self, db_session):
+        """create_notification_channel_link() persists a new notification row."""
+        created_link = create_notification_channel_link(
+            session=db_session,
+            guild_id=GUILD_ALPHA_ID,
+            channel_id=CHANNEL_ONE_ID,
+            repo_owner="myorg",
+            repo_name="backend",
+        )
+
+        assert created_link is not None
+        assert created_link.channel_id == CHANNEL_ONE_ID
+        assert created_link.guild_id == GUILD_ALPHA_ID
+        assert created_link.repo_owner == "myorg"
+        assert created_link.repo_name == "backend"
+
+    def test_create_notification_channel_link_moves_repo_to_new_channel(self, db_session):
+        """create_notification_channel_link() should move a repo when re-run in another channel."""
+        create_notification_channel_link(
+            session=db_session,
+            guild_id=GUILD_ALPHA_ID,
+            channel_id=CHANNEL_ONE_ID,
+            repo_owner="myorg",
+            repo_name="backend",
+        )
+
+        updated_link = create_notification_channel_link(
+            session=db_session,
+            guild_id=GUILD_ALPHA_ID,
+            channel_id=CHANNEL_TWO_ID,
+            repo_owner="myorg",
+            repo_name="backend",
+        )
+
+        assert updated_link.channel_id == CHANNEL_TWO_ID
+
+    def test_create_notification_channel_link_allows_multiple_repos_per_channel(self, db_session):
+        """create_notification_channel_link() should allow several repos to share one feed channel."""
+        create_notification_channel_link(
+            session=db_session,
+            guild_id=GUILD_ALPHA_ID,
+            channel_id=CHANNEL_ONE_ID,
+            repo_owner="myorg",
+            repo_name="backend",
+        )
+        create_notification_channel_link(
+            session=db_session,
+            guild_id=GUILD_ALPHA_ID,
+            channel_id=CHANNEL_ONE_ID,
+            repo_owner="myorg",
+            repo_name="frontend",
+        )
+
+        notification_links = list_notification_links_for_channel(db_session, CHANNEL_ONE_ID)
+
+        assert len(notification_links) == 2
+        returned_repositories = {
+            f"{notification_link.repo_owner}/{notification_link.repo_name}"
+            for notification_link in notification_links
+        }
+        assert returned_repositories == {"myorg/backend", "myorg/frontend"}
+
+
+# ── get_channel_link_for_repo ──────────────────────────────────────────────────
+
+
+class TestGetChannelLinkForRepo:
+    """Tests for the get_channel_link_for_repo() repository function."""
+
+    def test_get_channel_link_for_repo_returns_link_for_known_repository(self, db_session):
+        """get_channel_link_for_repo() returns the command channel for a repository."""
+        create_channel_link(
+            session=db_session,
+            guild_id=GUILD_ALPHA_ID,
+            channel_id=CHANNEL_ONE_ID,
+            repo_owner="acme",
+            repo_name="api",
+            github_pat="ghp_test",
+        )
+
+        fetched_link = get_channel_link_for_repo(db_session, "acme", "api")
+
+        assert fetched_link is not None
+        assert fetched_link.channel_id == CHANNEL_ONE_ID
+
+    def test_get_channel_link_for_repo_returns_none_for_unknown_repository(self, db_session):
+        """get_channel_link_for_repo() returns None when the repository is not linked."""
+        result = get_channel_link_for_repo(db_session, "unknown", "repo")
+
+        assert result is None
+
+
+# ── get_notification_channel_link ──────────────────────────────────────────────
+
+
+class TestGetNotificationChannelLink:
+    """Tests for the get_notification_channel_link() repository function."""
+
+    def test_get_notification_channel_link_returns_link_for_known_repository(self, db_session):
+        """get_notification_channel_link() returns the notification channel for a repository."""
+        create_notification_channel_link(
+            session=db_session,
+            guild_id=GUILD_ALPHA_ID,
+            channel_id=CHANNEL_TWO_ID,
+            repo_owner="acme",
+            repo_name="api",
+        )
+
+        fetched_link = get_notification_channel_link(db_session, "acme", "api")
+
+        assert fetched_link is not None
+        assert fetched_link.channel_id == CHANNEL_TWO_ID
+
+    def test_get_notification_channel_link_returns_none_for_unknown_repository(self, db_session):
+        """get_notification_channel_link() returns None when the repository is not configured."""
+        result = get_notification_channel_link(db_session, "unknown", "repo")
+
+        assert result is None
+
+
+# ── delete_notification_channel_link ───────────────────────────────────────────
+
+
+class TestDeleteNotificationChannelLink:
+    """Tests for the delete_notification_channel_link() repository function."""
+
+    def test_delete_notification_channel_link_removes_record_and_returns_true(self, db_session):
+        """delete_notification_channel_link() removes an existing notification link."""
+        create_notification_channel_link(
+            session=db_session,
+            guild_id=GUILD_ALPHA_ID,
+            channel_id=CHANNEL_ONE_ID,
+            repo_owner="org",
+            repo_name="repo",
+        )
+
+        was_deleted = delete_notification_channel_link(db_session, "org", "repo")
+
+        assert was_deleted is True
+        assert get_notification_channel_link(db_session, "org", "repo") is None
+
+    def test_delete_notification_channel_link_returns_false_for_unknown_repository(self, db_session):
+        """delete_notification_channel_link() returns False when no notification link exists."""
+        was_deleted = delete_notification_channel_link(db_session, "org", "missing")
+
+        assert was_deleted is False
 
 
 # ── enable_nlp_channel ────────────────────────────────────────────────────────

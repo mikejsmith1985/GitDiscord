@@ -1,14 +1,14 @@
 """
 SQLAlchemy ORM model definitions for the GitDiscord bot database.
 
-Defines the ChannelRepoLink and NlpChannel tables, along with engine
-factory and table-creation helpers used at startup.
+Defines the command-channel, notification-channel, and NLP tables, along with
+engine factory and table-creation helpers used at startup.
 """
 
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import DateTime, Integer, String, create_engine
+from sqlalchemy import DateTime, Integer, String, UniqueConstraint, create_engine
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped
 
 
@@ -49,6 +49,37 @@ class ChannelRepoLink(Base):
         return (
             f"<ChannelRepoLink channel_id={self.channel_id!r} "
             f"repo={self.repo_owner}/{self.repo_name}>"
+        )
+
+
+class NotificationChannelLink(Base):
+    """Maps a GitHub repository to the Discord channel that should receive notifications."""
+
+    __tablename__ = "notification_channel_links"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "repo_owner",
+            "repo_name",
+            name="uq_notification_channel_links_repo_owner_repo_name",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guild_id: Mapped[str] = mapped_column(String, nullable=False)
+    channel_id: Mapped[str] = mapped_column(String, nullable=False)
+    repo_owner: Mapped[str] = mapped_column(String, nullable=False)
+    repo_name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<NotificationChannelLink repo={self.repo_owner}/{self.repo_name} "
+            f"channel_id={self.channel_id!r}>"
         )
 
 
