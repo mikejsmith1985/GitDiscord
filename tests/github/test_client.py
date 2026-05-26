@@ -73,6 +73,55 @@ def _make_mock_comment(
     return mock_comment
 
 
+def _make_mock_pull_request(
+    number: int = 1,
+    title: str = "Test PR",
+    state: str = "open",
+    body: str | None = "PR body text",
+    html_url: str = "https://github.com/owner/repo/pull/1",
+    user_login: str = "testuser",
+    base_ref: str = "main",
+    head_ref: str = "feature/test",
+    merged: bool = False,
+    merged_by_login: str | None = None,
+    label_names: list[str] | None = None,
+    assignee_logins: list[str] | None = None,
+    is_draft: bool = False,
+) -> MagicMock:
+    """Build a MagicMock that mimics a PyGithub PullRequest object."""
+    mock_pull_request = MagicMock()
+    mock_pull_request.number = number
+    mock_pull_request.title = title
+    mock_pull_request.state = state
+    mock_pull_request.body = body
+    mock_pull_request.html_url = html_url
+    mock_pull_request.created_at = datetime(2024, 3, 1, 12, 0, 0)
+    mock_pull_request.user.login = user_login
+    mock_pull_request.base.ref = base_ref
+    mock_pull_request.head.ref = head_ref
+    mock_pull_request.merged = merged
+    mock_pull_request.merged_by = (
+        MagicMock(login=merged_by_login) if merged_by_login else None
+    )
+    mock_pull_request.draft = is_draft
+
+    resolved_label_names = label_names or []
+    mock_labels = []
+    for label_name in resolved_label_names:
+        label_mock = MagicMock()
+        label_mock.name = label_name
+        mock_labels.append(label_mock)
+    mock_pull_request.labels = mock_labels
+
+    resolved_assignee_logins = assignee_logins or []
+    mock_pull_request.assignees = [
+        MagicMock(login=assignee_login)
+        for assignee_login in resolved_assignee_logins
+    ]
+
+    return mock_pull_request
+
+
 @pytest.fixture
 def client_and_repo():
     """
@@ -307,6 +356,81 @@ class TestGetIssue:
         result = github_client.get_issue(9999)
 
         assert result is None
+
+
+# ── get_pull_request ───────────────────────────────────────────────────────────
+
+
+class TestGetPullRequest:
+    """Tests for GitHubClient.get_pull_request()."""
+
+    def test_get_pull_request_returns_correct_dict_for_existing_pr(self, client_and_repo):
+        """get_pull_request() returns a populated dict when the PR number exists."""
+        github_client, mock_repo = client_and_repo
+        mock_pull_request = _make_mock_pull_request(
+            number=42,
+            title="Upgrade dependencies",
+            state="open",
+            user_login="carol",
+            base_ref="main",
+            head_ref="feature/deps",
+        )
+        mock_repo.get_pull.return_value = mock_pull_request
+
+        result = github_client.get_pull_request(42)
+
+        assert result is not None
+        assert result["number"] == 42
+        assert result["title"] == "Upgrade dependencies"
+        assert result["user_login"] == "carol"
+        assert result["base_ref"] == "main"
+        assert result["head_ref"] == "feature/deps"
+        assert result["created_at"] == "2024-03-01T12:00:00"
+        mock_repo.get_pull.assert_called_once_with(42)
+
+    def test_get_pull_request_returns_none_for_missing_pr(self, client_and_repo):
+        """get_pull_request() returns None when PyGithub raises UnknownObjectException."""
+        github_client, mock_repo = client_and_repo
+        mock_repo.get_pull.side_effect = UnknownObjectException(404, "Not Found", {})
+
+        result = github_client.get_pull_request(9999)
+
+        assert result is None
+
+    def test_get_pull_request_handles_null_body(self, client_and_repo):
+        """get_pull_request() converts a None body to an empty string."""
+        github_client, mock_repo = client_and_repo
+        mock_repo.get_pull.return_value = _make_mock_pull_request(body=None)
+
+        result = github_client.get_pull_request(1)
+
+        assert result["body"] == ""
+
+    def test_get_pull_request_handles_no_merged_by(self, client_and_repo):
+        """get_pull_request() returns None for merged_by_login when GitHub omits it."""
+        github_client, mock_repo = client_and_repo
+        mock_repo.get_pull.return_value = _make_mock_pull_request(
+            merged=True,
+            merged_by_login=None,
+        )
+
+        result = github_client.get_pull_request(1)
+
+        assert result["merged"] is True
+        assert result["merged_by_login"] is None
+
+    def test_get_pull_request_maps_labels_and_assignees(self, client_and_repo):
+        """get_pull_request() serializes labels and assignees as plain strings."""
+        github_client, mock_repo = client_and_repo
+        mock_repo.get_pull.return_value = _make_mock_pull_request(
+            label_names=["bug", "P1"],
+            assignee_logins=["alice", "bob"],
+        )
+
+        result = github_client.get_pull_request(1)
+
+        assert result["labels"] == ["bug", "P1"]
+        assert result["assignees"] == ["alice", "bob"]
 
 
 # ── create_issue ──────────────────────────────────────────────────────────────

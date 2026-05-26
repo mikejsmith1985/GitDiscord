@@ -20,7 +20,7 @@ from discord.ext import commands
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.db import repository
-from src.formatters.discord_embeds import format_issue_dict
+from src.formatters.discord_embeds import format_issue_dict, format_pr_dict
 from src.github import GitHubClient
 
 
@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 # and tests reference symbols instead of bare strings, preventing typo bugs.
 ACTION_LIST = "list"
 ACTION_VIEW = "view"
+ACTION_VIEW_PR = "view_pr"
 ACTION_CREATE = "create"
 ACTION_COMMENT = "comment"
 ACTION_CLOSE = "close"
@@ -102,6 +103,13 @@ PATTERN_CLOSE_ISSUE = re.compile(
     re.IGNORECASE,
 )
 
+# Matches view/show commands for a specific pull request number.
+PATTERN_VIEW_PR = re.compile(
+    r"^(?:(?:show|view)\s+)?pr\s+#?(?P<pr_num_short>\d+)$"
+    r"|^(?:(?:show|view)\s+)?pull\s+request\s+#?(?P<pr_num_long>\d+)$",
+    re.IGNORECASE,
+)
+
 # Matches issue references embedded inside normal conversation text.
 # Examples:
 #   - "gh issue #123"
@@ -110,6 +118,14 @@ PATTERN_CLOSE_ISSUE = re.compile(
 PATTERN_INLINE_ISSUE_REFERENCE = re.compile(
     r"(?:\b(?:gh|github)\s+issue\s+#?(?P<issue_num_prefixed>\d+)\b)"
     r"|(?:\bissue\s+#(?P<issue_num_plain>\d+)\b)",
+    re.IGNORECASE,
+)
+
+# Matches PR references embedded inside normal conversation text.
+PATTERN_INLINE_PR_REFERENCE = re.compile(
+    r"(?:\b(?:gh|github)\s+(?:pr|pull\s+request)\s+#?(?P<pr_num_prefixed>\d+)\b)"
+    r"|(?:\bpr\s+#(?P<pr_num_plain>\d+)\b)"
+    r"|(?:\bpull\s+request\s+#(?P<pr_num_plain_long>\d+)\b)",
     re.IGNORECASE,
 )
 
@@ -132,6 +148,9 @@ class ParsedCommand:
 
     issue_number: int | None = None
     """The GitHub issue number extracted from the message (view, comment, close actions)."""
+
+    pr_number: int | None = None
+    """The GitHub pull request number extracted from PR reference messages."""
 
     title: str | None = None
     """The issue title extracted after the colon in a create command."""
@@ -221,6 +240,18 @@ def parse_command(text: str) -> ParsedCommand:
             issue_number=int(close_match.group("issue_num")),
         )
 
+    # ── View specific pull request ──────────────────────────────────────────
+    pull_request_match = PATTERN_VIEW_PR.match(stripped_text)
+    if pull_request_match:
+        raw_pull_request_number = (
+            pull_request_match.group("pr_num_short")
+            or pull_request_match.group("pr_num_long")
+        )
+        return ParsedCommand(
+            action=ACTION_VIEW_PR,
+            pr_number=int(raw_pull_request_number),
+        )
+
     # ── Inline issue reference inside free text ──────────────────────────────
     inline_issue_reference_match = PATTERN_INLINE_ISSUE_REFERENCE.search(stripped_text)
     if inline_issue_reference_match:
@@ -231,6 +262,19 @@ def parse_command(text: str) -> ParsedCommand:
         return ParsedCommand(
             action=ACTION_VIEW,
             issue_number=int(raw_issue_number),
+        )
+
+    # ── Inline pull request reference inside free text ───────────────────────
+    inline_pull_request_match = PATTERN_INLINE_PR_REFERENCE.search(stripped_text)
+    if inline_pull_request_match:
+        raw_pull_request_number = (
+            inline_pull_request_match.group("pr_num_prefixed")
+            or inline_pull_request_match.group("pr_num_plain")
+            or inline_pull_request_match.group("pr_num_plain_long")
+        )
+        return ParsedCommand(
+            action=ACTION_VIEW_PR,
+            pr_number=int(raw_pull_request_number),
         )
 
     # ── No pattern matched ────────────────────────────────────────────────────
@@ -439,7 +483,9 @@ class NlpMessageHandler:
 
         try:
             github_client = GitHubClient(
-                personal_access_token=channel_link.github_pat,
+                github_app_id=self._bot.github_app_id,
+                github_app_private_key=self._bot.github_app_private_key,
+                github_app_installation_id=self._bot.github_app_installation_id,
                 repo_owner=channel_link.repo_owner,
                 repo_name=channel_link.repo_name,
             )
@@ -482,6 +528,7 @@ class NlpMessageHandler:
         action_handler_map = {
             ACTION_LIST:    self._handle_list,
             ACTION_VIEW:    self._handle_view,
+            ACTION_VIEW_PR: self._handle_view_pr,
             ACTION_CREATE:  self._handle_create,
             ACTION_COMMENT: self._handle_comment,
             ACTION_CLOSE:   self._handle_close,
@@ -539,6 +586,24 @@ class NlpMessageHandler:
         response_embed = format_issue_dict(
             _normalize_issue_dict_for_embed(issue_dict), action="viewed"
         )
+        await message.reply(embed=response_embed)
+
+    async def _handle_view_pr(
+        self,
+        message: discord.Message,
+        parsed_command: ParsedCommand,
+        github_client: GitHubClient,
+    ) -> None:
+        """Fetch and display a single pull request by its number."""
+        pull_request_dict = github_client.get_pull_request(parsed_command.pr_number)
+
+        if pull_request_dict is None:
+            await message.reply(
+                f"❌ Pull request #{parsed_command.pr_number} was not found."
+            )
+            return
+
+        response_embed = format_pr_dict(pull_request_dict)
         await message.reply(embed=response_embed)
 
     async def _handle_create(

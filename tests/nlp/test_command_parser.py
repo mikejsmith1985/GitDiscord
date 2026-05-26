@@ -13,6 +13,7 @@ from src.nlp.command_parser import (
     ParsedCommand,
     ACTION_LIST,
     ACTION_VIEW,
+    ACTION_VIEW_PR,
     ACTION_CREATE,
     ACTION_COMMENT,
     ACTION_CLOSE,
@@ -140,6 +141,77 @@ class TestViewAction:
         result = parse_command("Please reference issue #88 in the follow-up notes.")
         assert result.action == ACTION_VIEW
         assert result.issue_number == 88
+
+
+# ── VIEW PR action ─────────────────────────────────────────────────────────────
+
+class TestViewPrAction:
+    """Tests for pull-request reference natural-language variants."""
+
+    def test_view_pr_with_hash(self):
+        """'view pr #7' should resolve to the PR view action."""
+        result = parse_command("view pr #7")
+        assert result.action == ACTION_VIEW_PR
+        assert result.pr_number == 7
+
+    def test_show_pr_with_hash(self):
+        """'show pr #7' should resolve to the PR view action."""
+        result = parse_command("show pr #7")
+        assert result.action == ACTION_VIEW_PR
+        assert result.pr_number == 7
+
+    def test_pr_number_without_hash(self):
+        """'view pr 7' should allow omitting the hash symbol."""
+        result = parse_command("view pr 7")
+        assert result.action == ACTION_VIEW_PR
+        assert result.pr_number == 7
+
+    def test_pull_request_full_form(self):
+        """'view pull request #42' should support the full phrase."""
+        result = parse_command("view pull request #42")
+        assert result.action == ACTION_VIEW_PR
+        assert result.pr_number == 42
+
+    def test_inline_gh_pr_reference(self):
+        """Free text containing 'gh pr #N' should resolve to the PR view action."""
+        result = parse_command("Check gh pr #15 before merging.")
+        assert result.action == ACTION_VIEW_PR
+        assert result.pr_number == 15
+
+    def test_inline_pr_hash_reference(self):
+        """Free text containing 'pr #N' should resolve to the PR view action."""
+        result = parse_command("Any notes on pr #99 yet?")
+        assert result.action == ACTION_VIEW_PR
+        assert result.pr_number == 99
+
+    def test_inline_github_pull_request_reference(self):
+        """Free text containing 'github pull request #N' should resolve to PR view."""
+        result = parse_command("The github pull request #7 needs review.")
+        assert result.action == ACTION_VIEW_PR
+        assert result.pr_number == 7
+
+    def test_inline_plain_pull_request_reference(self):
+        """Free text containing 'pull request #N' should resolve to PR view."""
+        result = parse_command("Please review pull request #31 when you can.")
+        assert result.action == ACTION_VIEW_PR
+        assert result.pr_number == 31
+
+    def test_view_pr_case_insensitive(self):
+        """PR reference matching must be case-insensitive."""
+        result = parse_command("VIEW PR #3")
+        assert result.action == ACTION_VIEW_PR
+        assert result.pr_number == 3
+
+    def test_view_pr_large_number(self):
+        """PR numbers with many digits must be extracted correctly."""
+        result = parse_command("pr #10042")
+        assert result.action == ACTION_VIEW_PR
+        assert result.pr_number == 10_042
+
+    def test_pr_command_has_none_issue_number(self):
+        """PR references should not populate the issue_number field."""
+        result = parse_command("view pr #5")
+        assert result.issue_number is None
 
 
 # ── CREATE action ──────────────────────────────────────────────────────────────
@@ -304,6 +376,16 @@ class TestUnknownAction:
         result = parse_command("issue")
         assert result.action == ACTION_UNKNOWN
 
+    def test_pr_without_number_returns_unknown(self):
+        """'pr' with no number must not match the PR view pattern."""
+        result = parse_command("pr")
+        assert result.action == ACTION_UNKNOWN
+
+    def test_pull_request_without_number_returns_unknown(self):
+        """'view pull request' with no number must not match the PR view pattern."""
+        result = parse_command("view pull request")
+        assert result.action == ACTION_UNKNOWN
+
     def test_create_without_colon_returns_unknown(self):
         """'create issue Fix bug' (missing colon) must not match create."""
         result = parse_command("create issue Fix bug")
@@ -332,6 +414,7 @@ class TestParsedCommandDefaults:
         """All optional fields on an unknown command must be None."""
         result = parse_command("random text")
         assert result.issue_number is None
+        assert result.pr_number is None
         assert result.title is None
         assert result.body is None
         assert result.comment_text is None
@@ -340,9 +423,11 @@ class TestParsedCommandDefaults:
         """A list command does not reference a specific issue number."""
         result = parse_command("list issues")
         assert result.issue_number is None
+        assert result.pr_number is None
 
     def test_view_command_has_none_title_and_body(self):
         """A view command does not create content, so title and body must be None."""
         result = parse_command("issue #1")
         assert result.title is None
         assert result.body is None
+        assert result.pr_number is None

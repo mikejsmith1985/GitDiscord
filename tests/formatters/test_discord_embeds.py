@@ -15,6 +15,7 @@ from src.formatters.discord_embeds import (
     format_pr_review_requested,
     format_pr_merged,
     format_pr_closed_without_merge,
+    format_pr_dict,
     format_issue_dict,
     format_issue_comment_event,
     format_commit_comment_event,
@@ -105,6 +106,35 @@ def _build_issue_dict(
         "body": body,
         "html_url": html_url,
         "labels": labels if labels is not None else [],
+    }
+
+
+def _build_pr_dict(
+    number: int = 99,
+    title: str = "Add dark mode",
+    state: str = "open",
+    merged: bool = False,
+    html_url: str = "https://github.com/org/repo/pull/99",
+    author_login: str = "bob",
+    base_ref: str = "main",
+    head_ref: str = "feature/dark-mode",
+    body: str | None = "PR description text",
+    labels: list | None = None,
+    merged_by_login: str | None = None,
+) -> dict:
+    """Construct a plain PR dict in the shape returned by GitHubClient."""
+    return {
+        "number": number,
+        "title": title,
+        "state": state,
+        "merged": merged,
+        "url": html_url,
+        "user_login": author_login,
+        "base_ref": base_ref,
+        "head_ref": head_ref,
+        "body": body,
+        "labels": labels if labels is not None else [],
+        "merged_by_login": merged_by_login,
     }
 
 
@@ -350,6 +380,92 @@ class TestFormatPrClosedWithoutMerge:
     def test_pr_closed_has_gitdiscord_footer(self):
         """format_pr_closed_without_merge() stamps the embed footer with 'GitDiscord'."""
         embed = format_pr_closed_without_merge(_build_pr_payload(sender_login="kate"))
+
+        assert embed.footer.text == EXPECTED_FOOTER_TEXT
+
+
+# ── format_pr_dict ─────────────────────────────────────────────────────────────
+
+
+class TestFormatPrDict:
+    """Tests for the format_pr_dict() formatter function."""
+
+    def test_open_pr_has_green_color(self):
+        """Open PR references should use a green embed color."""
+        embed = format_pr_dict(_build_pr_dict(state="open"))
+
+        assert embed.color == discord.Color.green()
+
+    def test_merged_pr_has_purple_color(self):
+        """Merged PR references should use a purple embed color."""
+        embed = format_pr_dict(_build_pr_dict(state="closed", merged=True))
+
+        assert embed.color == discord.Color.purple()
+
+    def test_closed_unmerged_pr_has_red_color(self):
+        """Closed but unmerged PR references should use a red embed color."""
+        embed = format_pr_dict(_build_pr_dict(state="closed", merged=False))
+
+        assert embed.color == discord.Color.red()
+
+    def test_pr_dict_includes_number_and_title_in_embed_title(self):
+        """PR reference embeds should include the PR number and title."""
+        embed = format_pr_dict(_build_pr_dict(number=17, title="Fix login flow"))
+
+        assert "17" in embed.title
+        assert "Fix login flow" in embed.title
+
+    def test_pr_dict_includes_author_login_in_description(self):
+        """PR reference embeds should include the author login."""
+        embed = format_pr_dict(_build_pr_dict(author_login="alice"))
+
+        assert "alice" in embed.description
+
+    def test_pr_dict_includes_branch_relationship_in_description(self):
+        """PR reference embeds should show the base and head branches."""
+        embed = format_pr_dict(_build_pr_dict(base_ref="main", head_ref="feature/auth"))
+
+        assert "`main` ← `feature/auth`" in embed.description
+
+    def test_pr_dict_body_is_truncated_to_max_chars(self):
+        """Long PR bodies should be truncated to keep embeds readable."""
+        oversized_body = "p" * (MAX_BODY_PREVIEW_CHARS + 50)
+
+        embed = format_pr_dict(_build_pr_dict(body=oversized_body))
+
+        assert "…" in embed.description
+
+    def test_pr_dict_handles_none_body_gracefully(self):
+        """PR reference formatting should not fail when the PR body is empty."""
+        embed = format_pr_dict(_build_pr_dict(body=None))
+
+        assert embed is not None
+
+    def test_pr_dict_displays_labels_when_present(self):
+        """PR reference embeds should list labels when they are present."""
+        embed = format_pr_dict(_build_pr_dict(labels=["bug", "P1"]))
+
+        assert "bug" in embed.description
+        assert "P1" in embed.description
+
+    def test_pr_dict_sets_embed_url(self):
+        """PR reference embeds should link directly to the GitHub PR."""
+        embed = format_pr_dict(_build_pr_dict(html_url="https://github.com/org/repo/pull/17"))
+
+        assert embed.url == "https://github.com/org/repo/pull/17"
+
+    def test_pr_dict_accepts_html_url_key_fallback(self):
+        """PR reference embeds should accept webhook-style html_url keys too."""
+        pull_request = _build_pr_dict()
+        pull_request["html_url"] = pull_request.pop("url")
+
+        embed = format_pr_dict(pull_request)
+
+        assert embed.url == "https://github.com/org/repo/pull/99"
+
+    def test_pr_dict_has_gitdiscord_footer(self):
+        """PR reference embeds should stamp the standard GitDiscord footer."""
+        embed = format_pr_dict(_build_pr_dict())
 
         assert embed.footer.text == EXPECTED_FOOTER_TEXT
 

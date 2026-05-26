@@ -400,3 +400,61 @@ async def test_nlp_handler_resolves_inline_issue_reference_and_replies_with_embe
     reply_embed = message.reply.await_args.kwargs["embed"]
     assert reply_embed is not None
     assert reply_embed.url == "https://github.com/owner/repo/issues/123"
+
+
+@pytest.mark.asyncio
+async def test_nlp_handler_resolves_inline_pr_reference_and_replies_with_embed():
+    """Inline 'github PR #N' references should fetch and reply with a clickable PR embed."""
+    fake_db_session = MagicMock()
+    fake_db_session_factory = MagicMock(return_value=fake_db_session)
+    nlp_handler = NlpMessageHandler(
+        db_session_factory=fake_db_session_factory,
+        discord_bot=MagicMock(),
+    )
+
+    message = MagicMock()
+    message.author.bot = False
+    message.channel.id = 444444444
+    message.content = "Hey team, please check github PR #23 before merging."
+    message.reply = AsyncMock()
+    message.add_reaction = AsyncMock()
+
+    pull_request_lookup_result = {
+        "number": 23,
+        "title": "Add review workflow",
+        "state": "open",
+        "body": "Details",
+        "url": "https://github.com/owner/repo/pull/23",
+        "created_at": "2024-01-01T00:00:00",
+        "user_login": "alice",
+        "base_ref": "main",
+        "head_ref": "feature/review-workflow",
+        "merged": False,
+        "merged_by_login": None,
+        "labels": [],
+        "assignees": [],
+    }
+
+    with patch(
+        "src.nlp.command_parser.repository.is_nlp_channel",
+        return_value=True,
+    ), patch(
+        "src.nlp.command_parser.repository.get_channel_link",
+        return_value=SimpleNamespace(
+            github_pat="GITHUB_APP_AUTH",
+            repo_owner="owner",
+            repo_name="repo",
+        ),
+    ), patch(
+        "src.nlp.command_parser.GitHubClient",
+    ) as mock_github_client_class:
+        mock_github_client = mock_github_client_class.return_value
+        mock_github_client.get_pull_request.return_value = pull_request_lookup_result
+
+        await nlp_handler.handle_message(message)
+
+    mock_github_client.get_pull_request.assert_called_once_with(23)
+    message.reply.assert_awaited_once()
+    reply_embed = message.reply.await_args.kwargs["embed"]
+    assert reply_embed is not None
+    assert reply_embed.url == "https://github.com/owner/repo/pull/23"

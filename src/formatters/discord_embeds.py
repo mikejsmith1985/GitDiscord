@@ -233,7 +233,83 @@ def format_pr_closed_without_merge(payload: dict) -> discord.Embed:
     return embed
 
 
+def format_pr_dict(pull_request: dict) -> discord.Embed:
+    """
+    Formats a plain GitHub pull request dict as a Discord embed.
+
+    Accepts the REST/API shape returned by GitHubClient so inline PR references
+    can reuse the same visual style as webhook notifications without pretending
+    the data came from a webhook envelope.
+    """
+    pull_request_title = pull_request.get("title", "Untitled PR")
+    pull_request_number = pull_request.get("number", 0)
+    pull_request_url = pull_request.get("html_url") or pull_request.get("url", "")
+    pull_request_state = pull_request.get("state", "open")
+    was_merged = bool(pull_request.get("merged", False))
+    author_login = (
+        pull_request.get("user", {}).get("login")
+        if isinstance(pull_request.get("user"), dict)
+        else None
+    ) or pull_request.get("user_login", "unknown")
+    base_branch = (
+        pull_request.get("base", {}).get("ref")
+        if isinstance(pull_request.get("base"), dict)
+        else None
+    ) or pull_request.get("base_ref", "unknown")
+    head_branch = (
+        pull_request.get("head", {}).get("ref")
+        if isinstance(pull_request.get("head"), dict)
+        else None
+    ) or pull_request.get("head_ref", "unknown")
+
+    raw_body = pull_request.get("body") or ""
+    body_preview = (
+        raw_body[:MAX_BODY_PREVIEW_CHARS] + "…"
+        if len(raw_body) > MAX_BODY_PREVIEW_CHARS
+        else raw_body
+    )
+
+    label_names = _extract_label_names(pull_request.get("labels", []) or [])
+    description_lines = [
+        f"**Author:** {author_login}",
+        f"**State:** {pull_request_state}",
+        f"**Branch:** `{base_branch}` ← `{head_branch}`",
+    ]
+    if label_names:
+        description_lines.append(f"**Labels:** {', '.join(label_names)}")
+    if body_preview:
+        description_lines += ["", body_preview]
+
+    if pull_request_state == "closed" and was_merged:
+        embed_color = discord.Color.purple()
+    elif pull_request_state == "closed":
+        embed_color = discord.Color.red()
+    else:
+        embed_color = discord.Color.green()
+
+    embed = discord.Embed(
+        title=f"🔀 PR #{pull_request_number}: {pull_request_title}",
+        description="\n".join(description_lines),
+        color=embed_color,
+        url=pull_request_url or None,
+    )
+    embed.set_footer(text=_FOOTER_TEXT)
+    return embed
+
+
 # ── Issues ─────────────────────────────────────────────────────────────────────
+
+def _extract_label_names(labels: list) -> list[str]:
+    """Return label names from GitHub webhook dicts or GitHubClient strings."""
+    label_names = []
+    for label in labels:
+        if isinstance(label, dict):
+            label_name = label.get("name", "")
+        else:
+            label_name = str(label) if label else ""
+        if label_name:
+            label_names.append(label_name)
+    return label_names
 
 def format_issue_dict(issue: dict, action: str = "opened") -> discord.Embed:
     """
@@ -266,14 +342,7 @@ def format_issue_dict(issue: dict, action: str = "opened") -> discord.Embed:
     # or plain string format (GitHubClient: "bug").  Supporting both keeps
     # this formatter usable regardless of which data source called it.
     labels: list = issue.get("labels", []) or []
-    label_names = []
-    for label in labels:
-        if isinstance(label, dict):
-            label_name = label.get("name", "")
-        else:
-            label_name = str(label) if label else ""
-        if label_name:
-            label_names.append(label_name)
+    label_names = _extract_label_names(labels)
 
     description_lines = [
         f"**State:** {issue_state}",
