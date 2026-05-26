@@ -14,11 +14,13 @@ it to the linked channel.
 
 import hashlib
 import hmac
+import json
 import logging
 import os
-from collections.abc import Callable, Awaitable
+from collections.abc import Callable
 from typing import Any
 
+import discord
 import uvicorn
 from fastapi import FastAPI, Request, Response
 from sqlalchemy.orm import Session
@@ -39,6 +41,7 @@ logger = logging.getLogger(__name__)
 # Header names exactly as GitHub sends them.
 GITHUB_SIGNATURE_HEADER = "X-Hub-Signature-256"
 GITHUB_EVENT_HEADER = "X-GitHub-Event"
+GITDISCORD_DEBUG_HEADER = "X-GitDiscord-Debug"
 
 # Prefix GitHub prepends to the hex-encoded HMAC digest.
 _SIGNATURE_PREFIX = "sha256="
@@ -46,6 +49,17 @@ _SIGNATURE_PREFIX = "sha256="
 # HTTP status codes used in this module kept as named constants for clarity.
 _HTTP_UNAUTHORIZED = 401
 _HTTP_OK = 200
+
+# Delivery outcome strings are stable because they are surfaced in diagnostic
+# webhook responses and GitHub delivery logs.
+_DELIVERY_REASON_SENT = "sent"
+_DELIVERY_REASON_INVALID_REPO = "invalid_repo_full_name"
+_DELIVERY_REASON_NO_REPO_LINK = "no_repo_link"
+_DELIVERY_REASON_CHANNEL_NOT_FOUND = "channel_not_found"
+_DELIVERY_REASON_INVALID_CHANNEL_ID = "invalid_channel_id"
+_DELIVERY_REASON_NOT_ROUTED = "not_routed"
+_DELIVERY_ROUTE_NOTIFICATION = "notification_channel_links"
+_DELIVERY_ROUTE_LEGACY = "channel_repo_links"
 
 
 # ── Signature validation ────────────────────────────────────────────────────────
@@ -80,6 +94,57 @@ def _validate_github_signature(raw_body: bytes, signature_header: str, webhook_s
     # how many leading bytes match — this closes a timing-oracle side channel.
     received_hex = signature_header[len(_SIGNATURE_PREFIX):]
     return hmac.compare_digest(expected_digest, received_hex)
+
+
+def _build_delivery_outcome(
+    *,
+    was_delivered: bool,
+    reason: str,
+    repo_full_name: str = "",
+    route: str | None = None,
+    channel_id: str | None = None,
+) -> dict[str, Any]:
+    """Create a compact delivery result for logs and signed debug responses."""
+    return {
+        "was_delivered": was_delivered,
+        "reason": reason,
+        "repo_full_name": repo_full_name,
+        "route": route,
+        "channel_id": channel_id,
+    }
+
+
+async def _resolve_discord_channel(
+    discord_bot: Any,
+    channel_id: str,
+    repo_full_name: str,
+) -> Any | None:
+    """
+    Resolve a Discord channel from cache first, then the API when the cache is cold.
+
+    GitHub can deliver webhooks immediately after a restart, before discord.py's
+    gateway cache is fully warm. Fetching the channel from Discord avoids losing
+    notifications during that startup race.
+    """
+    numeric_channel_id = int(channel_id)
+    discord_channel = discord_bot.get_channel(numeric_channel_id)
+    if discord_channel is not None:
+        return discord_channel
+
+    fetch_channel = getattr(discord_bot, "fetch_channel", None)
+    if fetch_channel is None:
+        return None
+
+    try:
+        return await fetch_channel(numeric_channel_id)
+    except discord.DiscordException as discord_error:
+        logger.warning(
+            "discord_bot.fetch_channel failed for channel_id=%s (repo=%s): %s",
+            channel_id,
+            repo_full_name,
+            discord_error,
+        )
+        return None
 
 
 # ── App factory ─────────────────────────────────────────────────────────────────
@@ -136,36 +201,38 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
 
     @app.get("/debug/channels/{channel_id}")
     async def debug_channel(channel_id: str):
-       """
-       Debug endpoint to check if bot can see and message a Discord channel.
+        """Check whether the bot can resolve and send embeds to a Discord channel."""
+        try:
+            channel = await _resolve_discord_channel(discord_bot, channel_id, "debug")
+        except ValueError as value_error:
+            return {
+                "status": "error",
+                "channel_id": channel_id,
+                "error": str(value_error),
+            }
 
-       Helps diagnose why webhook notifications are not being sent.
-       """
-       try:
-           channel = discord_bot.get_channel(int(channel_id))
-           if channel is None:
-               return {
-                   "status": "error",
-                   "channel_id": channel_id,
-                   "issue": "Bot cannot see this channel. It may not be a member or the channel ID is invalid.",
-               }
-           return {
-               "status": "ok",
-               "channel_id": channel_id,
-               "channel_name": channel.name,
-               "guild_id": str(channel.guild.id) if channel.guild else None,
-               "can_send": channel.permissions_for(channel.guild.me).send_messages if channel.guild else None,
-           }
-       except Exception as error:
-           return {
-               "status": "error",
-               "channel_id": channel_id,
-               "error": str(error),
-           }
+        if channel is None:
+            return {
+                "status": "error",
+                "channel_id": channel_id,
+                "issue": "Bot cannot see this channel. It may not be a member or the channel ID is invalid.",
+            }
+
+        channel_permissions = (
+            channel.permissions_for(channel.guild.me) if channel.guild else None
+        )
+        return {
+            "status": "ok",
+            "channel_id": channel_id,
+            "channel_name": channel.name,
+            "guild_id": str(channel.guild.id) if channel.guild else None,
+            "can_send": channel_permissions.send_messages if channel_permissions else None,
+            "can_embed": channel_permissions.embed_links if channel_permissions else None,
+        }
 
     # ── Channel send helper ─────────────────────────────────────────────────────
 
-    async def _channel_send_fn(payload: dict, embed) -> None:
+    async def _channel_send_fn(payload: dict, embed) -> dict[str, Any]:
         """
         Resolve the target Discord channel from the payload and send an embed.
 
@@ -185,7 +252,11 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
             logger.warning(
                 "Webhook payload is missing a valid repository.full_name; cannot route embed."
             )
-            return
+            return _build_delivery_outcome(
+                was_delivered=False,
+                reason=_DELIVERY_REASON_INVALID_REPO,
+                repo_full_name=repo_full_name,
+            )
 
         # The DB stores owner and name in separate columns, so we split the
         # full_name string to query them individually.
@@ -202,6 +273,7 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
             )
             if notification_channel_link is not None:
                 channel_id = notification_channel_link.channel_id
+                delivery_route = _DELIVERY_ROUTE_NOTIFICATION
                 logger.info(
                     "Found notification channel link: %s → %s", repo_full_name, channel_id
                 )
@@ -219,27 +291,64 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
                         "No Discord channel linked to repository %s — embed not sent.",
                         repo_full_name,
                     )
-                    return
+                    return _build_delivery_outcome(
+                        was_delivered=False,
+                        reason=_DELIVERY_REASON_NO_REPO_LINK,
+                        repo_full_name=repo_full_name,
+                    )
                 channel_id = channel_link.channel_id
+                delivery_route = _DELIVERY_ROUTE_LEGACY
                 logger.info(
                     "Found legacy channel link: %s → %s", repo_full_name, channel_id
                 )
 
-        discord_channel = discord_bot.get_channel(int(channel_id))
+        try:
+            discord_channel = await _resolve_discord_channel(
+                discord_bot,
+                channel_id,
+                repo_full_name,
+            )
+        except ValueError:
+            logger.warning(
+                "Stored channel_id=%s for repository %s is not a valid Discord ID.",
+                channel_id,
+                repo_full_name,
+            )
+            return _build_delivery_outcome(
+                was_delivered=False,
+                reason=_DELIVERY_REASON_INVALID_CHANNEL_ID,
+                repo_full_name=repo_full_name,
+                route=delivery_route,
+                channel_id=channel_id,
+            )
+
         if discord_channel is None:
             logger.warning(
-                "discord_bot.get_channel returned None for channel_id=%s (repo=%s). "
+                "Could not resolve Discord channel_id=%s for repo=%s. "
                 "The bot may not be a member of that channel.",
                 channel_id,
                 repo_full_name,
             )
-            return
+            return _build_delivery_outcome(
+                was_delivered=False,
+                reason=_DELIVERY_REASON_CHANNEL_NOT_FOUND,
+                repo_full_name=repo_full_name,
+                route=delivery_route,
+                channel_id=channel_id,
+            )
 
         await discord_channel.send(embed=embed)
         logger.info(
             "✓ Sent embed to channel_id=%s for repository %s",
             channel_id,
             repo_full_name,
+        )
+        return _build_delivery_outcome(
+            was_delivered=True,
+            reason=_DELIVERY_REASON_SENT,
+            repo_full_name=repo_full_name,
+            route=delivery_route,
+            channel_id=channel_id,
         )
 
     # ── GitHub webhook receiver ─────────────────────────────────────────────────
@@ -277,23 +386,44 @@ def create_webhook_app(discord_bot: Any, db_session_factory: Callable[[], Sessio
         logger.info("━━ Received GitHub webhook event: %s ━━", event_type.upper())
 
         payload: dict = await request.json()
+        delivery_outcome = _build_delivery_outcome(
+            was_delivered=False,
+            reason=_DELIVERY_REASON_NOT_ROUTED,
+            repo_full_name=payload.get("repository", {}).get("full_name", ""),
+        )
+
+        async def tracked_channel_send_fn(
+            tracked_payload: dict,
+            tracked_embed: Any,
+        ) -> dict[str, Any]:
+            """Capture whether a routed webhook actually reached Discord."""
+            nonlocal delivery_outcome
+            delivery_outcome = await _channel_send_fn(tracked_payload, tracked_embed)
+            return delivery_outcome
 
         if event_type == "push":
-            await handle_push_event(payload, _channel_send_fn)
+            await handle_push_event(payload, tracked_channel_send_fn)
         elif event_type == "pull_request":
-            await handle_pr_event(payload, _channel_send_fn)
+            await handle_pr_event(payload, tracked_channel_send_fn)
         elif event_type == "issues":
-            await handle_issue_event(payload, _channel_send_fn)
+            await handle_issue_event(payload, tracked_channel_send_fn)
         elif event_type == "issue_comment":
-            await handle_issue_comment_event(payload, _channel_send_fn)
+            await handle_issue_comment_event(payload, tracked_channel_send_fn)
         elif event_type == "commit_comment":
-            await handle_commit_comment_event(payload, _channel_send_fn)
+            await handle_commit_comment_event(payload, tracked_channel_send_fn)
         else:
             # Return 200 for unrecognised events so GitHub does not retry them.
             logger.debug("Ignoring unsupported GitHub event type: %s", event_type)
 
+        response_body = {"received": True}
+        should_include_debug_response = (
+            request.headers.get(GITDISCORD_DEBUG_HEADER, "").lower() == "true"
+        )
+        if should_include_debug_response:
+            response_body["delivery"] = delivery_outcome
+
         return Response(
-            content='{"received": true}',
+            content=json.dumps(response_body),
             status_code=_HTTP_OK,
             media_type="application/json",
         )

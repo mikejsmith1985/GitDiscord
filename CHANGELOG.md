@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Signed webhook delivery diagnostics** (`src/webhooks/server.py`): Signed webhook tests can now include `X-GitDiscord-Debug: true` to return the exact delivery outcome (`sent`, `no_repo_link`, `channel_not_found`, etc.) in the response body, turning GitHub delivery logs into hard evidence instead of a generic HTTP 200.
 - **Webhook diagnostic logging and endpoint** (`src/webhooks/server.py`, `src/webhooks/handlers/pr_handler.py`): Enhanced issue webhook handler with detailed tracing of issue numbers and actions; channel lookup now logs whether a notification or legacy command-channel link is used; added `/debug/channels/{channel_id}` diagnostic endpoint to verify bot visibility and send permissions in Discord channels
 - **Legacy-to-notification channel migration script** (`scripts/migrate_notification_links.py`): Helper utility for existing GitDiscord users to migrate `channel_repo_links` entries to the new `notification_channel_links` table, ensuring webhooks are delivered to the correct channels for repos configured with the old `/link` command
 - **Issue/comment webhook notifications** (`src/webhooks/server.py`, `src/webhooks/handlers/issue_handler.py`, `src/formatters/discord_embeds.py`): GitHub `issues`, `issue_comment`, and `commit_comment` events are now routed to Discord notification channels with dedicated embeds for issue lifecycle updates and discussion activity.
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Thread-based issue drafts** (`src/bot/commands/issue_commands.py`): `/issue create-thread` collects recent messages from the current thread, preserves authorship and order, and turns the discussion into a GitHub issue draft for review.
 
 ### Fixed
+- **Cold Discord channel cache drops** (`src/webhooks/server.py`): Webhook delivery now falls back from `discord_bot.get_channel()` to `discord_bot.fetch_channel()` so GitHub events are not silently dropped when Railway accepts webhooks before Discord's gateway cache is fully warm.
 - **Database path default** (`src/config.py`): Changed default `DATABASE_PATH` from `./gitdiscord.db` to `./data/gitdiscord.db` so the container's `appuser` can write the SQLite file — the container only has write access to `/app/data`, not `/app`
 
 ### Fixed

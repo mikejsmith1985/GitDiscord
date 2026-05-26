@@ -130,6 +130,9 @@ def _build_routing_test_client(
         def get_channel(self, channel_id):
             return self._channels_by_id.get(channel_id)
 
+        async def fetch_channel(self, channel_id):
+            return self._channels_by_id.get(channel_id)
+
     @contextmanager
     def mock_session_factory():
         database_session = session_factory()
@@ -399,6 +402,135 @@ def test_webhook_routes_issue_related_events_to_notification_channel(
     assert command_channel is not None
     assert notification_channel.send.await_count == 1
     assert command_channel.send.await_count == 0
+
+
+def test_webhook_debug_response_reports_missing_repo_link(monkeypatch):
+    """Diagnostic webhook requests should explain when no repo link exists."""
+    client, command_channel, notification_channel = _build_routing_test_client(
+        monkeypatch,
+    )
+    payload_dict = {
+        "action": "opened",
+        "repository": {"full_name": "owner/repo"},
+        "issue": {
+            "number": 30,
+            "title": "Missing link test",
+            "state": "open",
+            "body": "Issue body",
+            "html_url": "https://github.com/owner/repo/issues/30",
+            "labels": [],
+        },
+    }
+    body = json.dumps(payload_dict).encode()
+
+    response = client.post(
+        "/webhook/github",
+        content=body,
+        headers={
+            GITHUB_SIGNATURE_HEADER: _make_signature(body),
+            GITHUB_EVENT_HEADER: "issues",
+            "X-GitDiscord-Debug": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert command_channel is None
+    assert notification_channel is None
+    assert response.json()["delivery"] == {
+        "was_delivered": False,
+        "reason": "no_repo_link",
+        "repo_full_name": "owner/repo",
+        "route": None,
+        "channel_id": None,
+    }
+
+
+def test_webhook_fetches_channel_when_discord_cache_misses(monkeypatch):
+    """Webhook delivery should use Discord's API when the local channel cache is cold."""
+    monkeypatch.setenv("WEBHOOK_SECRET", _TEST_SECRET)
+
+    from contextlib import contextmanager
+    from unittest.mock import AsyncMock
+
+    temporary_database_folder = tempfile.mkdtemp(prefix="gitdiscord-fetch-tests-")
+    temporary_database_path = os.path.join(temporary_database_folder, "fetch.db")
+    database_engine = get_engine(temporary_database_path)
+    create_all_tables(database_engine)
+    session_factory = sessionmaker(bind=database_engine)
+
+    with session_factory() as seeded_session:
+        seeded_session.add(
+            NotificationChannelLink(
+                guild_id="1",
+                channel_id="222222222222222222",
+                repo_owner="owner",
+                repo_name="repo",
+            )
+        )
+        seeded_session.commit()
+
+    class FetchOnlyDiscordChannel:
+        """Capture sends for a channel that is only available through fetch_channel()."""
+
+        def __init__(self) -> None:
+            self.send = AsyncMock()
+
+    class FetchOnlyDiscordBot:
+        """Discord bot stub that simulates a cold get_channel() cache."""
+
+        def __init__(self, fetched_channel) -> None:
+            self.fetched_channel = fetched_channel
+
+        def get_channel(self, channel_id):
+            return None
+
+        async def fetch_channel(self, channel_id):
+            return self.fetched_channel
+
+    @contextmanager
+    def mock_session_factory():
+        database_session = session_factory()
+        try:
+            yield database_session
+        finally:
+            database_session.close()
+
+    fetched_channel = FetchOnlyDiscordChannel()
+    app = create_webhook_app(FetchOnlyDiscordBot(fetched_channel), mock_session_factory)
+    client = TestClient(app)
+    payload_dict = {
+        "action": "opened",
+        "repository": {"full_name": "owner/repo"},
+        "issue": {
+            "number": 31,
+            "title": "Fetch channel test",
+            "state": "open",
+            "body": "Issue body",
+            "html_url": "https://github.com/owner/repo/issues/31",
+            "labels": [],
+        },
+    }
+    body = json.dumps(payload_dict).encode()
+
+    response = client.post(
+        "/webhook/github",
+        content=body,
+        headers={
+            GITHUB_SIGNATURE_HEADER: _make_signature(body),
+            GITHUB_EVENT_HEADER: "issues",
+            "X-GitDiscord-Debug": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert fetched_channel.send.await_count == 1
+    assert response.json()["delivery"] == {
+        "was_delivered": True,
+        "reason": "sent",
+        "repo_full_name": "owner/repo",
+        "route": "notification_channel_links",
+        "channel_id": "222222222222222222",
+    }
 
 
 # ── Startup safety ─────────────────────────────────────────────────────────────
