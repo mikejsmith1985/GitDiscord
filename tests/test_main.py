@@ -316,6 +316,25 @@ async def test_help_command_shows_capability_guide():
 
 
 @pytest.mark.asyncio
+async def test_help_public_command_posts_pin_ready_guide():
+    """The /help-public command should post a public pin-ready help embed."""
+    fake_command_bot = FakeCommandBot()
+    link_commands = LinkCommands(fake_command_bot)
+    interaction = MagicMock()
+    interaction.response.send_message = AsyncMock()
+
+    await LinkCommands.show_help_public.callback(link_commands, interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    sent_message_text = interaction.response.send_message.await_args.args[0]
+    sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
+    assert "Pin this message" in sent_message_text
+    assert "GitDiscord Help" in sent_embed.title
+    assert "/notifications link <owner/repo>" in sent_embed.description
+    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is False
+
+
+@pytest.mark.asyncio
 async def test_create_issue_from_thread_collects_messages_and_creates_issue():
     """The thread collector should turn conversation history into a GitHub issue draft."""
     fake_command_bot = FakeCommandBot()

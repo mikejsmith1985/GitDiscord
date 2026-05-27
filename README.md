@@ -54,6 +54,7 @@
 |---------|-------------|
 | `/link <repo>` | Link this channel to a GitHub repo (`owner/repo`) using configured GitHub App auth |
 | `/help` | Show a full in-Discord guide for setup, issue commands, notifications, and NLP examples |
+| `/help-public` | Post a pin-ready help message in the channel (non-ephemeral) |
 | `/unlink` | Remove this channel's repo link |
 | `/status` | Show issue-command and notification routing for this channel |
 | `/notifications link <repo>` | Send GitHub webhook notifications for a repo to this channel |

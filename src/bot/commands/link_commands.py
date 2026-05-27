@@ -63,6 +63,9 @@ HELP_EMBED_DESCRIPTION = (
     "• `create issue: Fix login bug`"
 )
 
+# Message text posted with /help-public to make pinning intent explicit.
+HELP_PUBLIC_INTRO_MESSAGE = "📌 Pin this message so your team can quickly find GitDiscord commands."
+
 
 # ── Helper builders ────────────────────────────────────────────────────────────
 
@@ -116,7 +119,7 @@ class LinkCommands(commands.Cog):
     """
     Discord slash commands for managing command and notification channel routing.
 
-    All responses are ephemeral so credentials and configuration details
+    Most responses are ephemeral so credentials and configuration details
     remain private to the user who invoked the command.
     """
 
@@ -139,6 +142,27 @@ class LinkCommands(commands.Cog):
             HELP_EMBED_DESCRIPTION,
         )
         await interaction.response.send_message(embed=help_embed, ephemeral=True)
+
+    @app_commands.command(
+        name="help-public",
+        description="Post a pin-ready GitDiscord help guide in this channel.",
+    )
+    async def show_help_public(self, interaction: discord.Interaction) -> None:
+        """
+        Post a non-ephemeral help guide so channel admins can pin it.
+
+        This mirrors `/help` content but posts publicly, making it suitable
+        for team onboarding messages that should stay visible in-channel.
+        """
+        help_embed = _build_info_embed(
+            "🤖 GitDiscord Help",
+            HELP_EMBED_DESCRIPTION,
+        )
+        await interaction.response.send_message(
+            HELP_PUBLIC_INTRO_MESSAGE,
+            embed=help_embed,
+            ephemeral=False,
+        )
 
     # ── /link ──────────────────────────────────────────────────────────────────
 
