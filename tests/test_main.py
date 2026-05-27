@@ -297,6 +297,25 @@ async def test_status_reports_command_and_notification_channels():
 
 
 @pytest.mark.asyncio
+async def test_help_command_shows_capability_guide():
+    """The /help command should return an embed with setup and command guidance."""
+    fake_command_bot = FakeCommandBot()
+    link_commands = LinkCommands(fake_command_bot)
+    interaction = MagicMock()
+    interaction.response.send_message = AsyncMock()
+
+    await LinkCommands.show_help.callback(link_commands, interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    sent_embed = interaction.response.send_message.await_args.kwargs["embed"]
+    assert "GitDiscord Help" in sent_embed.title
+    assert "/link <owner/repo>" in sent_embed.description
+    assert "/issue create <title> [body]" in sent_embed.description
+    assert "/nlp-enable" in sent_embed.description
+    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+
+
+@pytest.mark.asyncio
 async def test_create_issue_from_thread_collects_messages_and_creates_issue():
     """The thread collector should turn conversation history into a GitHub issue draft."""
     fake_command_bot = FakeCommandBot()

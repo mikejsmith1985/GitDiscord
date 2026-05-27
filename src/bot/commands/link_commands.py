@@ -37,6 +37,32 @@ EMBED_COLOR_INFO = discord.Color.blue()
 # for several repositories.
 MAX_NOTIFICATION_REPOS_DISPLAYED = 5
 
+# Help content shown by /help so users can self-serve onboarding in Discord.
+HELP_EMBED_DESCRIPTION = (
+    "**Channel Setup**\n"
+    "• `/link <owner/repo>` — Link this channel for issue commands\n"
+    "• `/unlink` — Remove the issue-command link from this channel\n"
+    "• `/status` — Show command routing, notification routing, and NLP status\n\n"
+    "**Notification Routing**\n"
+    "• `/notifications link <owner/repo>` — Route webhook notifications here\n"
+    "• `/notifications unlink <owner/repo>` — Stop webhook notifications for a repo\n"
+    "• `/notifications status` — Show repos notifying this channel\n\n"
+    "**Issue Management**\n"
+    "• `/issue list [open|closed]`\n"
+    "• `/issue view <number>`\n"
+    "• `/issue create <title> [body]`\n"
+    "• `/issue create-thread`\n"
+    "• `/issue comment <number> <text>`\n"
+    "• `/issue close <number>`\n\n"
+    "**Natural Language Mode**\n"
+    "• `/nlp-enable` — Let plain-English messages trigger GitHub actions\n"
+    "• `/nlp-disable` — Turn NLP parsing off in this channel\n\n"
+    "**Quick Examples (NLP enabled)**\n"
+    "• `show issue #123`\n"
+    "• `gh pr #45`\n"
+    "• `create issue: Fix login bug`"
+)
+
 
 # ── Helper builders ────────────────────────────────────────────────────────────
 
@@ -97,6 +123,22 @@ class LinkCommands(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         """Store a reference to the bot so commands can access the DB session."""
         self.bot = bot
+
+    # ── /help ──────────────────────────────────────────────────────────────────
+
+    @app_commands.command(name="help", description="Show everything GitDiscord can do in this server.")
+    async def show_help(self, interaction: discord.Interaction) -> None:
+        """
+        Show a concise command and capability guide for GitDiscord users.
+
+        This keeps onboarding inside Discord so users do not need to leave
+        the channel to find setup commands, issue commands, or NLP examples.
+        """
+        help_embed = _build_info_embed(
+            "🤖 GitDiscord Help",
+            HELP_EMBED_DESCRIPTION,
+        )
+        await interaction.response.send_message(embed=help_embed, ephemeral=True)
 
     # ── /link ──────────────────────────────────────────────────────────────────
 
