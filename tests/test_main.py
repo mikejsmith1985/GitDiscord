@@ -143,6 +143,10 @@ async def test_main_wires_bot_and_webhook_app_together(
     mock_create_webhook_app.assert_called_once()
     call_kwargs = mock_create_webhook_app.call_args.kwargs
     assert call_kwargs["discord_bot"] is fake_bot_instance
+    mock_sessionmaker.assert_called_once_with(
+        bind=mock_get_engine.return_value,
+        expire_on_commit=False,
+    )
 
 
 class FakeCommandBot:
