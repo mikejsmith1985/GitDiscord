@@ -40,7 +40,12 @@ async def main() -> None:
     # Initialize the SQLite database and create tables if they don't exist yet
     database_engine = get_engine(settings.database_path)
     create_all_tables(database_engine)
-    db_session_factory = sessionmaker(bind=database_engine)
+    # Keep ORM attributes accessible after commit so command handlers can safely
+    # render values after the context-managed session exits.
+    db_session_factory = sessionmaker(
+        bind=database_engine,
+        expire_on_commit=False,
+    )
 
     # Create bot instance — cogs receive the session factory so they can query the DB
     discord_bot = GitDiscordBot(
