@@ -43,10 +43,6 @@ ACTION_UNKNOWN = "unknown"
 STATE_OPEN = "open"
 STATE_CLOSED = "closed"
 
-# Emoji used as a silent "I didn't understand" reaction — avoids cluttering
-# the channel with text replies for messages the bot doesn't recognise.
-EMOJI_UNKNOWN_COMMAND = "❓"
-
 # Maximum number of characters shown for a comment body preview in embeds.
 MAX_COMMENT_PREVIEW_CHARS = 300
 
@@ -471,10 +467,8 @@ class NlpMessageHandler:
             channel_link = repository.get_channel_link(db_session, channel_id)
 
         if channel_link is None:
-            # The channel is marked NLP-enabled but has no repository link.
-            # Reacting with ❓ signals misconfiguration without cluttering the
-            # channel with a text reply for every unlinked message.
-            await message.add_reaction(EMOJI_UNKNOWN_COMMAND)
+            # Silently ignore when NLP is enabled but no repository is linked.
+            # This avoids noisy reactions on every normal chat message.
             logger.warning(
                 "NLP channel %s has no repository link configured; ignoring message.",
                 channel_id,
@@ -537,9 +531,8 @@ class NlpMessageHandler:
         handler_coroutine = action_handler_map.get(parsed_command.action)
 
         if handler_coroutine is None:
-            # Action is "unknown" — react silently so the user knows the bot
-            # received their message but didn't recognise the intent.
-            await message.add_reaction(EMOJI_UNKNOWN_COMMAND)
+            # Unknown NLP intents are intentionally ignored to keep normal
+            # conversation clean in NLP-enabled channels.
             return
 
         try:

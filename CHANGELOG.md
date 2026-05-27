@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Thread-based issue drafts** (`src/bot/commands/issue_commands.py`): `/issue create-thread` collects recent messages from the current thread, preserves authorship and order, and turns the discussion into a GitHub issue draft for review.
 
 ### Fixed
+- **Noisy NLP unknown-message reactions** (`src/nlp/command_parser.py`, `tests/test_main.py`): NLP mode now silently ignores unrecognized messages (and unlinked NLP-channel chatter) instead of reacting with `❓` on every non-command post.
 - **`/status` detached SQLAlchemy rows** (`src/main.py`): Session factory now uses `expire_on_commit=False`, preventing `DetachedInstanceError` when status embeds read linked repository fields after DB session commit.
 - **NLP GitHub App authentication** (`src/nlp/command_parser.py`): Natural-language issue and PR lookups now use the configured GitHub App credentials instead of the removed personal-access-token constructor path.
 - **Cold Discord channel cache drops** (`src/webhooks/server.py`): Webhook delivery now falls back from `discord_bot.get_channel()` to `discord_bot.fetch_channel()` so GitHub events are not silently dropped when Railway accepts webhooks before Discord's gateway cache is fully warm.
