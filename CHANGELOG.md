@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **In-Discord `/help` slash command** (`src/bot/commands/link_commands.py`, `tests/test_main.py`, `README.md`): Added a discoverable help command that explains setup, notification routing, issue commands, and NLP examples directly in Discord as an ephemeral embed.
 - **Inline pull request reference detection** (`src/nlp/command_parser.py`, `src/github/client.py`, `src/formatters/discord_embeds.py`): NLP-enabled channels now detect `pr #123`, `gh pr #123`, `github PR #123`, and `pull request #123` references in normal conversation and reply with a clickable pull request embed.
 - **Signed webhook delivery diagnostics** (`src/webhooks/server.py`): Signed webhook tests can now include `X-GitDiscord-Debug: true` to return the exact delivery outcome (`sent`, `no_repo_link`, `channel_not_found`, etc.) in the response body, turning GitHub delivery logs into hard evidence instead of a generic HTTP 200.
 - **Webhook diagnostic logging and endpoint** (`src/webhooks/server.py`, `src/webhooks/handlers/pr_handler.py`): Enhanced issue webhook handler with detailed tracing of issue numbers and actions; channel lookup now logs whether a notification or legacy command-channel link is used; added `/debug/channels/{channel_id}` diagnostic endpoint to verify bot visibility and send permissions in Discord channels
