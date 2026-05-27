@@ -500,3 +500,70 @@ async def test_nlp_handler_resolves_inline_pr_reference_and_replies_with_embed()
     reply_embed = message.reply.await_args.kwargs["embed"]
     assert reply_embed is not None
     assert reply_embed.url == "https://github.com/owner/repo/pull/23"
+
+
+@pytest.mark.asyncio
+async def test_nlp_handler_silently_ignores_unknown_messages():
+    """Unknown NLP inputs should be ignored without reactions or replies."""
+    fake_db_session = MagicMock()
+    fake_db_session_factory = MagicMock(return_value=fake_db_session)
+    nlp_handler = NlpMessageHandler(
+        db_session_factory=fake_db_session_factory,
+        discord_bot=MagicMock(),
+    )
+
+    message = MagicMock()
+    message.author.bot = False
+    message.channel.id = 444444444
+    message.content = "This is normal conversation and not a command."
+    message.reply = AsyncMock()
+    message.add_reaction = AsyncMock()
+
+    with patch(
+        "src.nlp.command_parser.repository.is_nlp_channel",
+        return_value=True,
+    ), patch(
+        "src.nlp.command_parser.repository.get_channel_link",
+        return_value=SimpleNamespace(
+            github_pat="GITHUB_APP_AUTH",
+            repo_owner="owner",
+            repo_name="repo",
+        ),
+    ), patch(
+        "src.nlp.command_parser.GitHubClient",
+    ):
+        await nlp_handler.handle_message(message)
+
+    message.reply.assert_not_awaited()
+    message.add_reaction.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_nlp_handler_silently_ignores_unlinked_nlp_channel():
+    """NLP-enabled channels without repo links should be ignored without reactions."""
+    fake_db_session = MagicMock()
+    fake_db_session_factory = MagicMock(return_value=fake_db_session)
+    nlp_handler = NlpMessageHandler(
+        db_session_factory=fake_db_session_factory,
+        discord_bot=MagicMock(),
+    )
+
+    message = MagicMock()
+    message.author.bot = False
+    message.channel.id = 444444444
+    message.content = "hello team"
+    message.reply = AsyncMock()
+    message.add_reaction = AsyncMock()
+
+    with patch(
+        "src.nlp.command_parser.repository.is_nlp_channel",
+        return_value=True,
+    ), patch(
+        "src.nlp.command_parser.repository.get_channel_link",
+        return_value=None,
+    ), patch("src.nlp.command_parser.GitHubClient") as mock_github_client_class:
+        await nlp_handler.handle_message(message)
+
+    mock_github_client_class.assert_not_called()
+    message.reply.assert_not_awaited()
+    message.add_reaction.assert_not_awaited()
